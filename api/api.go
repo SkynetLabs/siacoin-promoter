@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/database"
 	"github.com/julienschmidt/httprouter"
@@ -20,11 +21,23 @@ type (
 		staticServer *http.Server
 	}
 
+	// Error is the error type returned by the API in case the status code
+	// is not a 2xx code.
+	Error struct {
+		Message string `json:"message"`
+	}
+
 	// errorWrap is a helper type for converting an `error` struct to JSON.
 	errorWrap struct {
 		Message string `json:"message"`
 	}
 )
+
+// Error implements the error interface for the Error type. It returns only the
+// Message field.
+func (err Error) Error() string {
+	return err.Message
+}
 
 // New creates a new API with the given logger and database.
 func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
@@ -37,6 +50,11 @@ func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
 		staticServer: &http.Server{
 			Addr:    fmt.Sprintf(":%d", port),
 			Handler: router,
+
+			// Set low timeouts since we expect to only talk to this
+			// service on the same machine.
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       10 * time.Second,
 		},
 	}
 	api.buildHTTPRoutes()
