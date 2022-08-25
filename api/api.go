@@ -11,6 +11,7 @@ import (
 )
 
 type (
+	// API manages the http API and all of its routes.
 	API struct {
 		staticDB     *database.Database
 		staticRouter *httprouter.Router
@@ -23,6 +24,7 @@ type (
 	}
 )
 
+// New creates a new API with the given logger and database.
 func New(log *logrus.Entry, db *database.Database) (*API, error) {
 	router := httprouter.New()
 	router.RedirectTrailingSlash = true

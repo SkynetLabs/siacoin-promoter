@@ -12,7 +12,9 @@ import (
 )
 
 type (
-	Config struct {
+	// config contains the configuration for the service which is parsed
+	// from the environment vars.
+	config struct {
 		LogLevel   logrus.Level
 		Port       int
 		DBURI      string
@@ -37,9 +39,9 @@ const (
 )
 
 // parseConfig parses a Config struct from the environment.
-func parseConfig() (*Config, error) {
+func parseConfig() (*config, error) {
 	// Create config with default vars.
-	cfg := &Config{
+	cfg := &config{
 		LogLevel: logrus.InfoLevel,
 	}
 

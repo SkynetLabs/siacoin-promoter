@@ -11,6 +11,8 @@ import (
 )
 
 type (
+	// Database is a wrapper for the connection to the database and
+	// abstracts all interactions with the database.
 	Database struct {
 		staticClient *mongo.Client
 
@@ -18,6 +20,7 @@ type (
 	}
 )
 
+// New creates a new database from the given credentials.
 func New(ctx context.Context, uri, username, password string) (*Database, error) {
 	// Connect to database.
 	creds := options.Credential{

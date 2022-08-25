@@ -7,6 +7,7 @@ import (
 
 func newTestDB() (*Database, error) {
 	username := "admin"
+	// nolint:gosec // Disable gosec since these are only test credentials.
 	password := "aO4tV5tC1oU3oQ7u"
 	uri := "mongodb://localhost:37017"
 	return New(context.Background(), uri, username, password)
