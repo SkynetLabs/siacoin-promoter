@@ -47,6 +47,11 @@ func New(ctx context.Context, uri, username, password string) (*Database, error)
 	return db, nil
 }
 
+// Close closes the connection to the database.
+func (db *Database) Close() error {
+	return db.staticClient.Disconnect(db.ctx)
+}
+
 // Ping uses the lowest readpref to determine whether the database connection is
 // healthy at the moment.
 func (db *Database) Ping() error {

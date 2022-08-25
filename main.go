@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/api"
 	"github.com/SkynetLabs/siacoin-promoter/database"
@@ -95,13 +99,43 @@ func main() {
 	}
 
 	// Create API.
-	api, err := api.New(apiLogger, db)
+	api, err := api.New(apiLogger, db, cfg.Port)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to init API")
 	}
 
-	err = api.ListenAndServe(cfg.Port)
+	// Register handler for shutdown.
+	var wg sync.WaitGroup
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, os.Kill, syscall.SIGTERM)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-sigChan
+
+		// Log that we are shutting down.
+		logger.Info("Caught stop signal. Shutting down...")
+
+		// Shut down API with sane timeout.
+		shutdownCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if err := api.Shutdown(shutdownCtx); err != nil {
+			logger.WithError(err).Error("Failed to shut down api")
+		}
+	}()
+
+	// Start serving API.
+	err = api.ListenAndServe()
 	if err != nil {
 		logger.WithError(err).Fatal("ListenAndServe returned an error")
+	}
+
+	// Wait for the goroutine to finish before continuing with the remaining
+	// shutdown procedures.
+	wg.Wait()
+
+	// Close database.
+	if err := db.Close(); err != nil {
+		logger.WithError(err).Fatal("Failed to close database gracefully")
 	}
 }

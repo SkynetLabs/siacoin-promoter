@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,8 +15,9 @@ type (
 	// API manages the http API and all of its routes.
 	API struct {
 		staticDB     *database.Database
-		staticRouter *httprouter.Router
 		staticLog    *logrus.Entry
+		staticRouter *httprouter.Router
+		staticServer *http.Server
 	}
 
 	// errorWrap is a helper type for converting an `error` struct to JSON.
@@ -25,16 +27,30 @@ type (
 )
 
 // New creates a new API with the given logger and database.
-func New(log *logrus.Entry, db *database.Database) (*API, error) {
+func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
 	router := httprouter.New()
 	router.RedirectTrailingSlash = true
 	api := &API{
 		staticDB:     db,
 		staticLog:    log,
 		staticRouter: router,
+		staticServer: &http.Server{
+			Addr:    fmt.Sprintf(":%d", port),
+			Handler: router,
+		},
 	}
 	api.buildHTTPRoutes()
 	return api, nil
+}
+
+// ListenAndServe starts the API. To unblock this call Shutdown.
+func (api *API) ListenAndServe() error {
+	return api.staticServer.ListenAndServe()
+}
+
+// Shutdown gracefully shuts down the API.
+func (api *API) Shutdown(ctx context.Context) error {
+	return api.staticServer.Shutdown(ctx)
 }
 
 // WriteError an error to the API caller.
@@ -61,10 +77,4 @@ func (api *API) WriteJSON(w http.ResponseWriter, obj interface{}) {
 	if err != nil {
 		api.staticLog.WithError(err).Error("Failed to encode response object")
 	}
-}
-
-// ListenAndServe starts the API server on the given port.
-func (api *API) ListenAndServe(port int) error {
-	api.staticLog.WithField("port", port).Info("Listening for incoming connections")
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), api.staticRouter)
 }

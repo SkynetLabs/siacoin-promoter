@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// newTestDB creates a Database instance for testing.
 func newTestDB() (*Database, error) {
 	username := "admin"
 	// nolint:gosec // Disable gosec since these are only test credentials.
@@ -13,7 +14,12 @@ func newTestDB() (*Database, error) {
 	return New(context.Background(), uri, username, password)
 }
 
+// TestPing makes sure that we can connect to a database and ping it.
 func TestPing(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	db, err := newTestDB()
 	if err != nil {
 		t.Fatal(err)
