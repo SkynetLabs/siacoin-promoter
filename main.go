@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -126,8 +127,8 @@ func main() {
 
 	// Start serving API.
 	err = api.ListenAndServe()
-	if err != nil {
-		logger.WithError(err).Fatal("ListenAndServe returned an error")
+	if err != nil && !errors.Contains(err, http.ErrServerClosed) {
+		logger.WithError(err).Error("ListenAndServe returned an error")
 	}
 
 	// Wait for the goroutine to finish before continuing with the remaining

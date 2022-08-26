@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 type (
 	// API manages the http API and all of its routes.
 	API struct {
-		staticDB     *database.Database
-		staticLog    *logrus.Entry
-		staticRouter *httprouter.Router
-		staticServer *http.Server
+		staticDB       *database.Database
+		staticListener net.Listener
+		staticLog      *logrus.Entry
+		staticRouter   *httprouter.Router
+		staticServer   *http.Server
 	}
 
 	// Error is the error type returned by the API in case the status code
@@ -41,14 +43,18 @@ func (err Error) Error() string {
 
 // New creates a new API with the given logger and database.
 func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
+	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	if err != nil {
+		return nil, err
+	}
 	router := httprouter.New()
 	router.RedirectTrailingSlash = true
 	api := &API{
-		staticDB:     db,
-		staticLog:    log,
-		staticRouter: router,
+		staticDB:       db,
+		staticListener: l,
+		staticLog:      log,
+		staticRouter:   router,
 		staticServer: &http.Server{
-			Addr:    fmt.Sprintf(":%d", port),
 			Handler: router,
 
 			// Set low timeouts since we expect to only talk to this
@@ -61,9 +67,14 @@ func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
 	return api, nil
 }
 
+// Address returns the address the API is listening on.
+func (api *API) Address() string {
+	return api.staticListener.Addr().String()
+}
+
 // ListenAndServe starts the API. To unblock this call Shutdown.
 func (api *API) ListenAndServe() error {
-	return api.staticServer.ListenAndServe()
+	return api.staticServer.Serve(api.staticListener)
 }
 
 // Shutdown gracefully shuts down the API.
