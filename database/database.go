@@ -55,5 +55,5 @@ func (db *Database) Close() error {
 // Ping uses the lowest readpref to determine whether the database connection is
 // healthy at the moment.
 func (db *Database) Ping() error {
-	return db.staticClient.Ping(db.ctx, readpref.Nearest())
+	return db.staticClient.Ping(db.ctx, nil)
 }

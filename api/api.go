@@ -84,7 +84,7 @@ func (api *API) Shutdown(ctx context.Context) error {
 
 // WriteError an error to the API caller.
 func (api *API) WriteError(w http.ResponseWriter, err error, code int) {
-	api.staticLog.WithError(err).WithField("statuscode", code)
+	api.staticLog.WithError(err).WithField("statuscode", code).Debug("WriteError")
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
@@ -98,7 +98,7 @@ func (api *API) WriteError(w http.ResponseWriter, err error, code int) {
 // error is written instead. The Content-Type of the response header is set
 // accordingly.
 func (api *API) WriteJSON(w http.ResponseWriter, obj interface{}) {
-	api.staticLog.Debug("WriteJSON:", obj)
+	api.staticLog.Debug("WriteJSON", obj)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

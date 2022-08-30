@@ -29,6 +29,10 @@ type (
 )
 
 const (
+	// apiShutdownTimeout is the timeout for gracefully shutting down the
+	// API before killing it.
+	apiShutdownTimeout = 20 * time.Second
+
 	// mongoDBURI is the environment variable for the mongodb URI.
 	mongoDBURI = "MONGODB_URI"
 
@@ -108,7 +112,7 @@ func main() {
 	// Register handler for shutdown.
 	var wg sync.WaitGroup
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, os.Kill, syscall.SIGTERM)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -118,7 +122,7 @@ func main() {
 		logger.Info("Caught stop signal. Shutting down...")
 
 		// Shut down API with sane timeout.
-		shutdownCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(ctx, apiShutdownTimeout)
 		defer cancel()
 		if err := api.Shutdown(shutdownCtx); err != nil {
 			logger.WithError(err).Error("Failed to shut down api")
