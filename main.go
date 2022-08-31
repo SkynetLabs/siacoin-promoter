@@ -58,6 +58,7 @@ const (
 
 	// envSkydAPIPassword is the environment variable for setting the skyd
 	// API password.
+	// nolint:gosec // this is not a credential
 	envSkydAPIPassword = "SKYD_API_PASSWORD"
 )
 
