@@ -9,7 +9,7 @@ func TestHealth(t *testing.T) {
 		t.SkipNow()
 	}
 	// Create tester.
-	tester, err := newTester()
+	tester, err := newTester(nil) // no skyd connection needed
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +25,11 @@ func TestHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Database should be alive.
+	// Database should be alive but not skyd.
 	if !hg.DBAlive {
-		t.Fatal(err)
+		t.Fatal("db should be alive")
+	}
+	if hg.SkydAlive {
+		t.Fatal("skyd shouldn't be alive since we didn't pass in a client")
 	}
 }

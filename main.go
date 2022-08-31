@@ -14,6 +14,7 @@ import (
 	"github.com/SkynetLabs/siacoin-promoter/database"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
+	"gitlab.com/SkynetLabs/skyd/node/api/client"
 )
 
 type (
@@ -25,26 +26,39 @@ type (
 		DBURI      string
 		DBUser     string
 		DBPassword string
+		SkydOpts   client.Options
 	}
 )
 
 const (
-	// apiShutdownTimeout is the timeout for gracefully shutting down the
+	// envAPIShutdownTimeout is the timeout for gracefully shutting down the
 	// API before killing it.
-	apiShutdownTimeout = 20 * time.Second
+	envAPIShutdownTimeout = 20 * time.Second
 
-	// mongoDBURI is the environment variable for the mongodb URI.
-	mongoDBURI = "MONGODB_URI"
+	// envMongoDBURI is the environment variable for the mongodb URI.
+	envMongoDBURI = "MONGODB_URI"
 
-	// mongoDBUser is the environment variable for the mongodb user.
-	mongoDBUser = "MONGODB_USER"
+	// envMongoDBUser is the environment variable for the mongodb user.
+	envMongoDBUser = "MONGODB_USER"
 
-	// mongoDBPassword is the environment variable for the mongodb password.
-	mongoDBPassword = "MONGODB_PASSWORD"
+	// envMongoDBPassword is the environment variable for the mongodb password.
+	envMongoDBPassword = "MONGODB_PASSWORD"
 
 	// envLogLevel is the environment variable for the log level used by
 	// this service.
 	envLogLevel = "SIACOIN_PROMOTER_LOG_LEVEL"
+
+	// envSkydAPIAddr is the environment variable for setting the skyd
+	// address.
+	envSkydAPIAddr = "SKYD_API_ADDRESS"
+
+	// envSkydAPIUserAgent is the environment variable for setting the skyd
+	// User Agent.
+	envSkydAPIUserAgent = "SKYD_API_USER_AGENT"
+
+	// envSkydAPIAddr is the environment variable for setting the skyd API
+	// password.
+	envSkydAPIPassword = "SKYD_API_PASSWORD"
 )
 
 // parseConfig parses a Config struct from the environment.
@@ -65,17 +79,29 @@ func parseConfig() (*config, error) {
 			return nil, errors.AddContext(err, "failed to parse log level")
 		}
 	}
-	cfg.DBURI, ok = os.LookupEnv(mongoDBURI)
+	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", mongoDBURI)
+		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)
 	}
-	cfg.DBUser, ok = os.LookupEnv(mongoDBUser)
+	cfg.DBUser, ok = os.LookupEnv(envMongoDBUser)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", mongoDBUser)
+		return nil, fmt.Errorf("%s wasn't specified", envMongoDBUser)
 	}
-	cfg.DBPassword, ok = os.LookupEnv(mongoDBPassword)
+	cfg.DBPassword, ok = os.LookupEnv(envMongoDBPassword)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", mongoDBPassword)
+		return nil, fmt.Errorf("%s wasn't specified", envMongoDBPassword)
+	}
+	cfg.SkydOpts.Address, ok = os.LookupEnv(envSkydAPIAddr)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIAddr)
+	}
+	cfg.SkydOpts.UserAgent, ok = os.LookupEnv(envSkydAPIUserAgent)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIUserAgent)
+	}
+	cfg.SkydOpts.Password, ok = os.LookupEnv(envSkydAPIPassword)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIPassword)
 	}
 	return cfg, nil
 }
@@ -103,8 +129,15 @@ func main() {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
 
+	// Connect to skyd.
+	skydClient := client.New(cfg.SkydOpts)
+	_, err = skydClient.DaemonReadyGet()
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to connect to skyd")
+	}
+
 	// Create API.
-	api, err := api.New(apiLogger, db, cfg.Port)
+	api, err := api.New(apiLogger, db, skydClient, cfg.Port)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to init API")
 	}
@@ -122,7 +155,7 @@ func main() {
 		logger.Info("Caught stop signal. Shutting down...")
 
 		// Shut down API with sane timeout.
-		shutdownCtx, cancel := context.WithTimeout(ctx, apiShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(ctx, envAPIShutdownTimeout)
 		defer cancel()
 		if err := api.Shutdown(shutdownCtx); err != nil {
 			logger.WithError(err).Error("Failed to shut down api")

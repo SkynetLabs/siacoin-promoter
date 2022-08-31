@@ -11,6 +11,7 @@ import (
 	"github.com/SkynetLabs/siacoin-promoter/database"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/SkynetLabs/skyd/node/api/client"
 )
 
 type (
@@ -21,6 +22,7 @@ type (
 		staticLog      *logrus.Entry
 		staticRouter   *httprouter.Router
 		staticServer   *http.Server
+		staticSkyd     *client.Client
 	}
 
 	// Error is the error type returned by the API in case the status code
@@ -42,7 +44,7 @@ func (err Error) Error() string {
 }
 
 // New creates a new API with the given logger and database.
-func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
+func New(log *logrus.Entry, db *database.Database, skydClient *client.Client, port int) (*API, error) {
 	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
 		return nil, err
@@ -62,6 +64,7 @@ func New(log *logrus.Entry, db *database.Database, port int) (*API, error) {
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       10 * time.Second,
 		},
+		staticSkyd: skydClient,
 	}
 	api.buildHTTPRoutes()
 	return api, nil
