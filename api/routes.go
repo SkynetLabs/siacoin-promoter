@@ -9,7 +9,8 @@ import (
 type (
 	// HealthGET is the type returned by the /health endpoint.
 	HealthGET struct {
-		DBAlive bool `json:"dbalive"`
+		DBAlive   bool `json:"dbalive"`
+		SkydAlive bool `json:"skydalive"`
 	}
 )
 
@@ -20,7 +21,13 @@ func (api *API) buildHTTPRoutes() {
 
 // healthGET returns the status of the service
 func (api *API) healthGET(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	var skydAlive bool
+	if api.staticSkyd != nil {
+		_, skydErr := api.staticSkyd.DaemonReadyGet()
+		skydAlive = skydErr == nil
+	}
 	api.WriteJSON(w, HealthGET{
-		DBAlive: api.staticDB.Ping() == nil,
+		DBAlive:   api.staticDB.Ping() == nil,
+		SkydAlive: skydAlive,
 	})
 }

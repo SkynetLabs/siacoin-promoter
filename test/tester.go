@@ -10,6 +10,7 @@ import (
 	"github.com/SkynetLabs/siacoin-promoter/database"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
+	"gitlab.com/SkynetLabs/skyd/node/api/client"
 )
 
 // newTestDB creates a Database instance for testing.
@@ -45,7 +46,7 @@ func (t *Tester) Close() error {
 }
 
 // newTester creates a new, ready-to-go tester.
-func newTester() (*Tester, error) {
+func newTester(skydClient *client.Client) (*Tester, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -55,7 +56,7 @@ func newTester() (*Tester, error) {
 	}
 
 	// Create API.
-	a, err := api.New(logrus.NewEntry(logger), db, 0)
+	a, err := api.New(logrus.NewEntry(logger), db, skydClient, 0)
 	if err != nil {
 		return nil, err
 	}
