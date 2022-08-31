@@ -138,8 +138,10 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envSkydAPIUserAgent); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logLevel, opts)
-	if !errors.Contains(err, errParseFailed) {
+	optsNoAgent := opts
+	optsNoAgent.UserAgent = defaultSkydUserAgent
+	err = assertConfig(uri, user, password, logLevel, optsNoAgent)
+	if err != nil {
 		t.Fatal(err)
 	}
 

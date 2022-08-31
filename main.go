@@ -31,6 +31,10 @@ type (
 )
 
 const (
+	// defaultSkydUserAgent defines the default agent used when no other
+	// value is specified by the user.
+	defaultSkydUserAgent = "Sia-Agent"
+
 	// envAPIShutdownTimeout is the timeout for gracefully shutting down the
 	// API before killing it.
 	envAPIShutdownTimeout = 20 * time.Second
@@ -67,6 +71,9 @@ func parseConfig() (*config, error) {
 	// Create config with default vars.
 	cfg := &config{
 		LogLevel: logrus.InfoLevel,
+		SkydOpts: client.Options{
+			UserAgent: defaultSkydUserAgent,
+		},
 	}
 
 	// Parse custom vars from environment.
@@ -96,9 +103,9 @@ func parseConfig() (*config, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIAddr)
 	}
-	cfg.SkydOpts.UserAgent, ok = os.LookupEnv(envSkydAPIUserAgent)
-	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIUserAgent)
+	userAgent, ok := os.LookupEnv(envSkydAPIUserAgent)
+	if ok {
+		cfg.SkydOpts.UserAgent = userAgent
 	}
 	cfg.SkydOpts.Password, ok = os.LookupEnv(envSkydAPIPassword)
 	if !ok {
