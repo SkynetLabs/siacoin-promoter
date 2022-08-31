@@ -56,8 +56,8 @@ const (
 	// User Agent.
 	envSkydAPIUserAgent = "SKYD_API_USER_AGENT"
 
-	// envSkydAPIAddr is the environment variable for setting the skyd API
-	// password.
+	// envSkydAPIPassword is the environment variable for setting the skyd
+	// API password.
 	envSkydAPIPassword = "SKYD_API_PASSWORD"
 )
 
