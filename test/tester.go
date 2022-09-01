@@ -19,7 +19,9 @@ func newTestDB() (*database.Database, error) {
 	// nolint:gosec // Disable gosec since these are only test credentials.
 	password := "aO4tV5tC1oU3oQ7u"
 	uri := "mongodb://localhost:37017"
-	return database.New(context.Background(), uri, username, password)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	return database.New(context.Background(), logrus.NewEntry(logger), uri, username, password)
 }
 
 // Tester is a pair of an API and a client to talk to that API for testing.
