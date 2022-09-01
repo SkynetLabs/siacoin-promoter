@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SkynetLabs/siacoin-promoter/utils"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/build"
+	"gitlab.com/SkynetLabs/skyd/siatest"
 	"go.sia.tech/siad/crypto"
 )
 
@@ -22,41 +24,53 @@ const (
 )
 
 // newTestPromoter creates a Promoter instance for testing.
-func newTestPromoter() (*Promoter, error) {
+func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	return New(context.Background(), logrus.NewEntry(logger), testURI, testUsername, testPassword)
+	skyd, err := utils.NewSkydForTesting(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword)
+	if err != nil {
+		return nil, nil, err
+	}
+	return p, skyd, nil
 }
 
 // newTestDBWithUpdateFunc creates a Promoter instance for testing.
-func newTestDBWithUpdateFunc(f updateFunc) (*Promoter, error) {
+func newTestDBWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
+	skyd, err := utils.NewSkydForTesting(name)
+	if err != nil {
+		return nil, nil, err
+	}
 	ctx := context.Background()
 	logEntry := logrus.NewEntry(logger)
 	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	p := newPromoter(context.Background(), logEntry, client)
+	p := newPromoter(context.Background(), &skyd.Client, logEntry, client)
 	p.initBackgroundThreads(f)
-	return p, nil
+	return p, skyd, nil
 }
 
-// TestPing makes sure that we can connect to a database and ping it.
-func TestPing(t *testing.T) {
+// TestHealth is a unit test for the promoter's Health method.
+func TestHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
 
-	db, err := newTestPromoter()
+	p, _, err := newTestPromoter(t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Ping(); err != nil {
-		t.Fatal(err)
+	if ph := p.Health(); ph.Database != nil || ph.Skyd != nil {
+		t.Fatal("not healthy", ph)
 	}
 }
 
@@ -82,10 +96,15 @@ func TestAddressWatcher(t *testing.T) {
 		}
 	}
 
-	db, err := newTestDBWithUpdateFunc(f)
+	db, node, err := newTestDBWithUpdateFunc(t.Name(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 
 	// Add some addresses.
 	var addrs []crypto.Hash

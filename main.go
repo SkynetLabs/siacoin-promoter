@@ -132,12 +132,6 @@ func main() {
 	apiLogger := logger.WithField("modules", "api")
 	dbLogger := logger.WithField("modules", "promoter")
 
-	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to connect to database")
-	}
-
 	// Connect to skyd.
 	skydClient := client.New(cfg.SkydOpts)
 	_, err = skydClient.DaemonReadyGet()
@@ -145,8 +139,14 @@ func main() {
 		logger.WithError(err).Fatal("Failed to connect to skyd")
 	}
 
+	// Create the promoter that talks to skyd and the database.
+	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to connect to database")
+	}
+
 	// Create API.
-	api, err := api.New(apiLogger, db, skydClient, cfg.Port)
+	api, err := api.New(apiLogger, db, cfg.Port)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to init API")
 	}

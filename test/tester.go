@@ -14,14 +14,14 @@ import (
 )
 
 // newTestPromoter creates a Promoter instance for testing.
-func newTestPromoter() (*promoter.Promoter, error) {
+func newTestPromoter(skyd *client.Client) (*promoter.Promoter, error) {
 	username := "admin"
 	// nolint:gosec // Disable gosec since these are only test credentials.
 	password := "aO4tV5tC1oU3oQ7u"
 	uri := "mongodb://localhost:37017"
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	return promoter.New(context.Background(), logrus.NewEntry(logger), uri, username, password)
+	return promoter.New(context.Background(), skyd, logrus.NewEntry(logger), uri, username, password)
 }
 
 // Tester is a pair of an API and a client to talk to that API for testing.
@@ -52,13 +52,13 @@ func newTester(skydClient *client.Client) (*Tester, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	db, err := newTestPromoter()
+	db, err := newTestPromoter(skydClient)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create API.
-	a, err := api.New(logrus.NewEntry(logger), db, skydClient, 0)
+	a, err := api.New(logrus.NewEntry(logger), db, 0)
 	if err != nil {
 		return nil, err
 	}

@@ -21,13 +21,9 @@ func (api *API) buildHTTPRoutes() {
 
 // healthGET returns the status of the service
 func (api *API) healthGET(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
-	var skydAlive bool
-	if api.staticSkyd != nil {
-		_, skydErr := api.staticSkyd.DaemonReadyGet()
-		skydAlive = skydErr == nil
-	}
+	ph := api.staticPromoter.Health()
 	api.WriteJSON(w, HealthGET{
-		DBAlive:   api.staticPromoter.Ping() == nil,
-		SkydAlive: skydAlive,
+		DBAlive:   ph.Database == nil,
+		SkydAlive: ph.Skyd == nil,
 	})
 }

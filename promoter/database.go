@@ -130,9 +130,3 @@ func (p *Promoter) Close() error {
 	// Disconnect from db.
 	return p.staticClient.Disconnect(p.ctx)
 }
-
-// Ping uses the lowest readpref to determine whether the database connection is
-// healthy at the moment.
-func (p *Promoter) Ping() error {
-	return p.staticClient.Ping(p.ctx, nil)
-}
