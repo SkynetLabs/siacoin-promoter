@@ -98,6 +98,19 @@ func TestAddressWatcher(t *testing.T) {
 		}
 	}
 
+	// Check if all addresses have been added.
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(inserted) != len(addrs) {
+			return fmt.Errorf("not all addresses were inserted %v != %v", len(inserted), len(addrs))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Remove them again.
 	for _, addr := range addrs {
 		if err := db.Unwatch(context.Background(), addr); err != nil {
@@ -105,7 +118,7 @@ func TestAddressWatcher(t *testing.T) {
 		}
 	}
 
-	// Run check in loop since it's async.
+	// Check if all addresses have been added once and deleted once.
 	err = build.Retry(100, 100*time.Millisecond, func() error {
 		mu.Lock()
 		defer mu.Unlock()
