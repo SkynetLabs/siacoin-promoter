@@ -27,7 +27,7 @@ func (api *API) healthGET(w http.ResponseWriter, req *http.Request, _ httprouter
 		skydAlive = skydErr == nil
 	}
 	api.WriteJSON(w, HealthGET{
-		DBAlive:   api.staticDB.Ping() == nil,
+		DBAlive:   api.staticPromoter.Ping() == nil,
 		SkydAlive: skydAlive,
 	})
 }

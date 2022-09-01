@@ -1,4 +1,4 @@
-package database
+package promoter
 
 import (
 	"context"
@@ -21,25 +21,28 @@ const (
 	testURI      = "mongodb://localhost:37017"
 )
 
-// newTestDB creates a Database instance for testing.
-func newTestDB() (*Database, error) {
+// newTestPromoter creates a Promoter instance for testing.
+func newTestPromoter() (*Promoter, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
 	return New(context.Background(), logrus.NewEntry(logger), testURI, testUsername, testPassword)
 }
 
-// newTestDBWithUpdateFunc creates a Database instance for testing.
-func newTestDBWithUpdateFunc(f updateFunc) (*Database, error) {
+// newTestDBWithUpdateFunc creates a Promoter instance for testing.
+func newTestDBWithUpdateFunc(f updateFunc) (*Promoter, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	db, err := connect(context.Background(), logrus.NewEntry(logger), testURI, testUsername, testPassword)
+	ctx := context.Background()
+	logEntry := logrus.NewEntry(logger)
+	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
 	if err != nil {
 		return nil, err
 	}
-	db.initBackgroundThreads(f)
-	return db, nil
+	p := newPromoter(context.Background(), logEntry, client)
+	p.initBackgroundThreads(f)
+	return p, nil
 }
 
 // TestPing makes sure that we can connect to a database and ping it.
@@ -48,7 +51,7 @@ func TestPing(t *testing.T) {
 		t.SkipNow()
 	}
 
-	db, err := newTestDB()
+	db, err := newTestPromoter()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,10 +74,8 @@ func TestAddressWatcher(t *testing.T) {
 		defer mu.Unlock()
 		switch update.OperationType {
 		case "insert":
-			fmt.Println("inserted", update.DocumentKey.Address)
 			inserted[update.DocumentKey.Address] = struct{}{}
 		case "delete":
-			fmt.Println("removed", update.DocumentKey.Address)
 			deleted[update.DocumentKey.Address] = struct{}{}
 		default:
 			t.Error("unknown", update.OperationType)

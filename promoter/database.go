@@ -1,8 +1,7 @@
-package database
+package promoter
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -25,22 +24,6 @@ type (
 	// in threadedAddressWatcher.
 	updateFunc func(WatchedAddressesUpdate)
 
-	// Database is a wrapper for the connection to the database and
-	// abstracts all interactions with the database.
-	Database struct {
-		staticClient *mongo.Client
-		staticDB     *mongo.Database
-		staticLogger *logrus.Entry
-
-		staticColWatchedAddresses *mongo.Collection
-
-		ctx          context.Context
-		bgCtx        context.Context
-		threadCancel context.CancelFunc
-
-		wg sync.WaitGroup
-	}
-
 	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
 		// Address is the actual address we track. We make that the _id
@@ -59,18 +42,8 @@ type (
 	}
 )
 
-// New creates a new database from the given credentials.
-func New(ctx context.Context, log *logrus.Entry, uri, username, password string) (*Database, error) {
-	db, err := connect(ctx, log, uri, username, password)
-	if err != nil {
-		return nil, err
-	}
-	db.initBackgroundThreads(db.managedProcessAddressUpdate)
-	return db, nil
-}
-
 // connect creates a new database object that is connected to a mongodb.
-func connect(ctx context.Context, log *logrus.Entry, uri, username, password string) (*Database, error) {
+func connect(ctx context.Context, log *logrus.Entry, uri, username, password string) (*mongo.Client, error) {
 	// Connect to database.
 	creds := options.Credential{
 		Username: username,
@@ -87,42 +60,13 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 	if err != nil {
 		return nil, err
 	}
-
-	// Grab database and collections for convenience fields.
-	database := client.Database(dbName)
-	watchedAddrs := database.Collection(colWatchedAddressesName)
-
-	// Create a new context for background threads.
-	bgCtx, cancel := context.WithCancel(ctx)
-
-	// Create store.
-	db := &Database{
-		bgCtx:                     bgCtx,
-		threadCancel:              cancel,
-		ctx:                       ctx,
-		staticClient:              client,
-		staticColWatchedAddresses: watchedAddrs,
-		staticDB:                  database,
-		staticLogger:              log,
-	}
-	return db, nil
-}
-
-// initBackgroundThreads starts the background threads that the db requires.
-func (db *Database) initBackgroundThreads(f updateFunc) {
-	// Start watching the collection that contains the addresses we want
-	// skyd to watch.
-	db.wg.Add(1)
-	go func() {
-		defer db.wg.Done()
-		db.threadedAddressWatcher(db.bgCtx, f)
-	}()
+	return client, nil
 }
 
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (db *Database) Watch(ctx context.Context, addr crypto.Hash) error {
-	_, err := db.staticColWatchedAddresses.InsertOne(ctx, WatchedAddress{
+func (p *Promoter) Watch(ctx context.Context, addr crypto.Hash) error {
+	_, err := p.staticColWatchedAddresses.InsertOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	return err
@@ -130,22 +74,16 @@ func (db *Database) Watch(ctx context.Context, addr crypto.Hash) error {
 
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (db *Database) Unwatch(ctx context.Context, addr crypto.Hash) error {
-	_, err := db.staticColWatchedAddresses.DeleteOne(ctx, WatchedAddress{
+func (p *Promoter) Unwatch(ctx context.Context, addr crypto.Hash) error {
+	_, err := p.staticColWatchedAddresses.DeleteOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	return err
 }
 
-// managedProcessAddressUpdate processes an update reported by
-// threadedAddressWatcher by forwarding it to skyd.
-func (db *Database) managedProcessAddressUpdate(update WatchedAddressesUpdate) {
-	// TODO: implement
-}
-
 // threadedAddressWatcher listens syncs skyd's and the database's watched
 // addresses and then continues listening for changes to the watched addresses.
-func (db *Database) threadedAddressWatcher(ctx context.Context, f updateFunc) {
+func (p *Promoter) threadedAddressWatcher(ctx context.Context, f updateFunc) {
 	// NOTE: The outter loop is a fallback mechanism in case of an error.
 	// During successful operations it should only do one full iteration.
 OUTER:
@@ -157,9 +95,9 @@ OUTER:
 		}
 
 		// Start watching the collection.
-		stream, err := db.staticColWatchedAddresses.Watch(ctx, mongo.Pipeline{})
+		stream, err := p.staticColWatchedAddresses.Watch(ctx, mongo.Pipeline{})
 		if err != nil {
-			db.staticLogger.WithError(err).Error("Failed to start watching address collection")
+			p.staticLogger.WithError(err).Error("Failed to start watching address collection")
 			time.Sleep(2 * time.Second) // sleep before retrying
 			continue OUTER              // try again
 		}
@@ -172,7 +110,7 @@ OUTER:
 		for stream.Next(ctx) {
 			var wa WatchedAddressesUpdate
 			if err := stream.Decode(&wa); err != nil {
-				db.staticLogger.WithError(err).Error("Failed to decode watched address")
+				p.staticLogger.WithError(err).Error("Failed to decode watched address")
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again
 			}
@@ -182,19 +120,19 @@ OUTER:
 }
 
 // Close closes the connection to the database.
-func (db *Database) Close() error {
+func (p *Promoter) Close() error {
 	// Cancel background threads.
-	db.threadCancel()
+	p.threadCancel()
 
 	// Wait for them to finish.
-	db.wg.Wait()
+	p.wg.Wait()
 
 	// Disconnect from db.
-	return db.staticClient.Disconnect(db.ctx)
+	return p.staticClient.Disconnect(p.ctx)
 }
 
 // Ping uses the lowest readpref to determine whether the database connection is
 // healthy at the moment.
-func (db *Database) Ping() error {
-	return db.staticClient.Ping(db.ctx, nil)
+func (p *Promoter) Ping() error {
+	return p.staticClient.Ping(p.ctx, nil)
 }

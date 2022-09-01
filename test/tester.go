@@ -7,21 +7,21 @@ import (
 	"net/http"
 
 	"github.com/SkynetLabs/siacoin-promoter/api"
-	"github.com/SkynetLabs/siacoin-promoter/database"
+	"github.com/SkynetLabs/siacoin-promoter/promoter"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 )
 
-// newTestDB creates a Database instance for testing.
-func newTestDB() (*database.Database, error) {
+// newTestPromoter creates a Promoter instance for testing.
+func newTestPromoter() (*promoter.Promoter, error) {
 	username := "admin"
 	// nolint:gosec // Disable gosec since these are only test credentials.
 	password := "aO4tV5tC1oU3oQ7u"
 	uri := "mongodb://localhost:37017"
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	return database.New(context.Background(), logrus.NewEntry(logger), uri, username, password)
+	return promoter.New(context.Background(), logrus.NewEntry(logger), uri, username, password)
 }
 
 // Tester is a pair of an API and a client to talk to that API for testing.
@@ -52,7 +52,7 @@ func newTester(skydClient *client.Client) (*Tester, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	db, err := newTestDB()
+	db, err := newTestPromoter()
 	if err != nil {
 		return nil, err
 	}

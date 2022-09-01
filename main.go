@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/api"
-	"github.com/SkynetLabs/siacoin-promoter/database"
+	"github.com/SkynetLabs/siacoin-promoter/promoter"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
@@ -130,10 +130,10 @@ func main() {
 	// Create the loggers for the submodules.
 	logger.SetLevel(cfg.LogLevel)
 	apiLogger := logger.WithField("modules", "api")
-	dbLogger := logger.WithField("modules", "database")
+	dbLogger := logger.WithField("modules", "promoter")
 
-	// Connect to database.
-	db, err := database.New(ctx, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
+	// Create the promoter that talks to skyd and the database.
+	db, err := promoter.New(ctx, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
