@@ -2,6 +2,11 @@ package database
 
 import (
 	"context"
+	"sync"
+	"time"
+
+	"github.com/sirupsen/logrus"
+	"go.sia.tech/siad/crypto"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -10,18 +15,62 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
+const (
+	dbName                  = "siacoinpromoter"
+	colWatchedAddressesName = "watchedaddresses"
+)
+
 type (
+	// updateFunc is the type of a function that can be used as a callback
+	// in threadedAddressWatcher.
+	updateFunc func(WatchedAddressesUpdate)
+
 	// Database is a wrapper for the connection to the database and
 	// abstracts all interactions with the database.
 	Database struct {
 		staticClient *mongo.Client
+		staticDB     *mongo.Database
+		staticLogger *logrus.Entry
 
-		ctx context.Context
+		staticColWatchedAddresses *mongo.Collection
+
+		ctx          context.Context
+		bgCtx        context.Context
+		threadCancel context.CancelFunc
+
+		wg sync.WaitGroup
+	}
+
+	// WatchedAddress describes an entry in the watched address collection.
+	WatchedAddress struct {
+		// Address is the actual address we track. We make that the _id
+		// of the object since the addresses should be indexed and
+		// unique anyway.
+		Address crypto.Hash `bson:"_id"`
+	}
+
+	// WatchedAddressesUpdate describes an update to the watched address
+	// collection.
+	WatchedAddressesUpdate struct {
+		DocumentKey struct {
+			Address crypto.Hash `bson:"_id"`
+		} `bson:"documentKey"`
+		OperationType string `bson:"operationType"`
 	}
 )
 
 // New creates a new database from the given credentials.
-func New(ctx context.Context, uri, username, password string) (*Database, error) {
+func New(ctx context.Context, log *logrus.Entry, uri, username, password string) (*Database, error) {
+	db, err := connect(ctx, log, uri, username, password)
+	if err != nil {
+		return nil, err
+	}
+	db.initBackgroundThreads(db.managedProcessAddressUpdate)
+	return db, nil
+}
+
+// connect creates a new database object that is connected to a mongodb.
+func connect(ctx context.Context, log *logrus.Entry, uri, username, password string) (*Database, error) {
 	// Connect to database.
 	creds := options.Credential{
 		Username: username,
@@ -30,7 +79,7 @@ func New(ctx context.Context, uri, username, password string) (*Database, error)
 	opts := options.Client().
 		ApplyURI(uri).
 		SetAuth(creds).
-		SetReadConcern(readconcern.Local()).
+		SetReadConcern(readconcern.Majority()).
 		SetReadPreference(readpref.Nearest()).
 		SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 
@@ -39,16 +88,108 @@ func New(ctx context.Context, uri, username, password string) (*Database, error)
 		return nil, err
 	}
 
+	// Grab database and collections for convenience fields.
+	database := client.Database(dbName)
+	watchedAddrs := database.Collection(colWatchedAddressesName)
+
+	// Create a new context for background threads.
+	bgCtx, cancel := context.WithCancel(ctx)
+
 	// Create store.
 	db := &Database{
-		ctx:          ctx,
-		staticClient: client,
+		bgCtx:                     bgCtx,
+		threadCancel:              cancel,
+		ctx:                       ctx,
+		staticClient:              client,
+		staticColWatchedAddresses: watchedAddrs,
+		staticDB:                  database,
+		staticLogger:              log,
 	}
 	return db, nil
 }
 
+// initBackgroundThreads starts the background threads that the db requires.
+func (db *Database) initBackgroundThreads(f updateFunc) {
+	// Start watching the collection that contains the addresses we want
+	// skyd to watch.
+	db.wg.Add(1)
+	go func() {
+		defer db.wg.Done()
+		db.threadedAddressWatcher(db.bgCtx, f)
+	}()
+}
+
+// Watch watches an address by adding it to the database.
+// threadedAddressWatcher will then pick up on that change and apply it to skyd.
+func (db *Database) Watch(ctx context.Context, addr crypto.Hash) error {
+	_, err := db.staticColWatchedAddresses.InsertOne(ctx, WatchedAddress{
+		Address: addr,
+	})
+	return err
+}
+
+// Unwatch unwatches an address by removing it from the database.
+// threadedAddressWatcher will then pick up on that change and apply it to skyd.
+func (db *Database) Unwatch(ctx context.Context, addr crypto.Hash) error {
+	_, err := db.staticColWatchedAddresses.DeleteOne(ctx, WatchedAddress{
+		Address: addr,
+	})
+	return err
+}
+
+// managedProcessAddressUpdate processes an update reported by
+// threadedAddressWatcher by forwarding it to skyd.
+func (db *Database) managedProcessAddressUpdate(update WatchedAddressesUpdate) {
+	// TODO: implement
+}
+
+// threadedAddressWatcher listens syncs skyd's and the database's watched
+// addresses and then continues listening for changes to the watched addresses.
+func (db *Database) threadedAddressWatcher(ctx context.Context, f updateFunc) {
+	// NOTE: The outter loop is a fallback mechanism in case of an error.
+	// During successful operations it should only do one full iteration.
+OUTER:
+	for {
+		select {
+		case <-ctx.Done():
+			return // shutdown
+		default:
+		}
+
+		// Start watching the collection.
+		stream, err := db.staticColWatchedAddresses.Watch(ctx, mongo.Pipeline{})
+		if err != nil {
+			db.staticLogger.WithError(err).Error("Failed to start watching address collection")
+			time.Sleep(2 * time.Second) // sleep before retrying
+			continue OUTER              // try again
+		}
+
+		// TODO: Fetch all watched addresses and compare them to skyd's
+		// watched addresses. We need to sync the database and skyd up
+		// before we can start relying on the change stream.
+
+		// Start listening for changes.
+		for stream.Next(ctx) {
+			var wa WatchedAddressesUpdate
+			if err := stream.Decode(&wa); err != nil {
+				db.staticLogger.WithError(err).Error("Failed to decode watched address")
+				time.Sleep(2 * time.Second) // sleep before retrying
+				continue OUTER              // try again
+			}
+			f(wa)
+		}
+	}
+}
+
 // Close closes the connection to the database.
 func (db *Database) Close() error {
+	// Cancel background threads.
+	db.threadCancel()
+
+	// Wait for them to finish.
+	db.wg.Wait()
+
+	// Disconnect from db.
 	return db.staticClient.Disconnect(db.ctx)
 }
 

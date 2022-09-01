@@ -130,9 +130,10 @@ func main() {
 	// Create the loggers for the submodules.
 	logger.SetLevel(cfg.LogLevel)
 	apiLogger := logger.WithField("modules", "api")
+	dbLogger := logger.WithField("modules", "database")
 
 	// Connect to database.
-	db, err := database.New(ctx, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
+	db, err := database.New(ctx, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
