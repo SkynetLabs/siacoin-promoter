@@ -38,6 +38,10 @@ func newSkydForTesting(testName string) (*siatest.TestNode, error) {
 // TestSkydConnection creates a tester with a skyd client and makes sure that it
 // shows up as healthy.
 func TestSkydConnection(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
 	// Spin up skyd instance.
 	node, err := newSkydForTesting(t.Name())
 	if err != nil {
