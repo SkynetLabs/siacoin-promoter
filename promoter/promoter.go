@@ -9,8 +9,11 @@ import (
 )
 
 type (
-	// Database is a wrapper for the connection to the database and
-	// abstracts all interactions with the database.
+	// Promoter is a wrapper around a skyd and a database client. It makes
+	// sure that skyd watches all the siacoin addresses it is supposed to
+	// and is capable of adding new addresses to watch and removing old
+	// ones. It can also track the incoming funds that users have sent to
+	// their assigned addresses.
 	Promoter struct {
 		staticClient *mongo.Client
 		staticDB     *mongo.Database
