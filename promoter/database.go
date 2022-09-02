@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	dbName                  = "siacoinpromoter"
-	colWatchedAddressesName = "watchedaddresses"
+	dbName                  = "siacoin-promoter"
+	colWatchedAddressesName = "watched_addresses"
 )
 
 type (
@@ -66,7 +66,7 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Watch(ctx context.Context, addr crypto.Hash) error {
-	_, err := p.staticColWatchedAddresses.InsertOne(ctx, WatchedAddress{
+	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	return err
@@ -75,10 +75,16 @@ func (p *Promoter) Watch(ctx context.Context, addr crypto.Hash) error {
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Unwatch(ctx context.Context, addr crypto.Hash) error {
-	_, err := p.staticColWatchedAddresses.DeleteOne(ctx, WatchedAddress{
+	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	return err
+}
+
+// staticColWatchedAddresses returns the collection used to store watched
+// addresses.
+func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
+	return p.staticDB.Collection(colWatchedAddressesName)
 }
 
 // threadedAddressWatcher listens syncs skyd's and the database's watched
@@ -95,7 +101,7 @@ OUTER:
 		}
 
 		// Start watching the collection.
-		stream, err := p.staticColWatchedAddresses.Watch(ctx, mongo.Pipeline{})
+		stream, err := p.staticColWatchedAddresses().Watch(ctx, mongo.Pipeline{})
 		if err != nil {
 			p.staticLogger.WithError(err).Error("Failed to start watching address collection")
 			time.Sleep(2 * time.Second) // sleep before retrying
