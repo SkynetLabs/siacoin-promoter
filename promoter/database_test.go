@@ -39,8 +39,8 @@ func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
 	return p, skyd, nil
 }
 
-// newTestDBWithUpdateFunc creates a Promoter instance for testing.
-func newTestDBWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
+// newTestPromoterWithUpdateFunc creates a Promoter instance for testing.
+func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -91,12 +91,14 @@ func TestAddressWatcher(t *testing.T) {
 			inserted[update.DocumentKey.Address] = struct{}{}
 		case "delete":
 			deleted[update.DocumentKey.Address] = struct{}{}
+		case "drop":
+		case "invalidate":
 		default:
 			t.Error("unknown", update.OperationType)
 		}
 	}
 
-	db, node, err := newTestDBWithUpdateFunc(t.Name(), f)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +106,15 @@ func TestAddressWatcher(t *testing.T) {
 		if err := node.Close(); err != nil {
 			t.Fatal(err)
 		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}()
+
+	// Reset database for the test.
+	if err := p.staticDB.Drop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	// Add some addresses.
 	var addrs []crypto.Hash
@@ -113,7 +123,7 @@ func TestAddressWatcher(t *testing.T) {
 		fastrand.Read(addr[:])
 		addrs = append(addrs, addr)
 
-		if err := db.Watch(context.Background(), addr); err != nil {
+		if err := p.Watch(context.Background(), addr); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -133,7 +143,7 @@ func TestAddressWatcher(t *testing.T) {
 
 	// Remove them again.
 	for _, addr := range addrs {
-		if err := db.Unwatch(context.Background(), addr); err != nil {
+		if err := p.Unwatch(context.Background(), addr); err != nil {
 			t.Fatal(err)
 		}
 	}

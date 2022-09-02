@@ -134,5 +134,5 @@ func (p *Promoter) Close() error {
 	p.wg.Wait()
 
 	// Disconnect from db.
-	return p.staticClient.Disconnect(p.ctx)
+	return p.staticDB.Client().Disconnect(p.ctx)
 }

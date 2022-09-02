@@ -24,7 +24,6 @@ type (
 	// ones. It can also track the incoming funds that users have sent to
 	// their assigned addresses.
 	Promoter struct {
-		staticClient *mongo.Client
 		staticDB     *mongo.Database
 		staticLogger *logrus.Entry
 
@@ -61,7 +60,6 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 		bgCtx:        bgCtx,
 		threadCancel: cancel,
 		ctx:          ctx,
-		staticClient: client,
 		staticDB:     database,
 		staticLogger: log,
 		staticSkyd:   skyd,
@@ -72,7 +70,7 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 func (p *Promoter) Health() Health {
 	_, skydErr := p.staticSkyd.DaemonReadyGet()
 	return Health{
-		Database: p.staticClient.Ping(p.ctx, nil),
+		Database: p.staticDB.Client().Ping(p.ctx, nil),
 		Skyd:     skydErr,
 	}
 }
