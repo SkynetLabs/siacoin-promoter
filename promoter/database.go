@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.sia.tech/siad/types"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -69,6 +70,11 @@ func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
 	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
 		Address: addr,
 	})
+	if mongo.IsDuplicateKeyError(err) {
+		// nothing to do, the ChangeStream should've picked up on that
+		// already.
+		return nil
+	}
 	return err
 }
 
@@ -85,6 +91,24 @@ func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
 // addresses.
 func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 	return p.staticDB.Collection(colWatchedAddressesName)
+}
+
+// staticWatchedDBAddresses returns all watched addresses as seen in the
+// database.
+func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]types.UnlockHash, error) {
+	c, err := p.staticColWatchedAddresses().Find(ctx, bson.D{})
+	if err != nil {
+		return nil, err
+	}
+	var addrs []types.UnlockHash
+	for c.Next(ctx) {
+		var addr WatchedAddress
+		if err := c.Decode(&addr); err != nil {
+			return nil, err
+		}
+		addrs = append(addrs, addr.Address)
+	}
+	return addrs, nil
 }
 
 // threadedAddressWatcher listens syncs skyd's and the database's watched

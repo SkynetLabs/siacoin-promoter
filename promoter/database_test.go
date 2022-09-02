@@ -173,3 +173,68 @@ func TestAddressWatcher(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestWatchedDBAddresses is a unit test or staticWatchedDBAddresses.
+func TestWatchedDBAddresses(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	p, node, err := newTestPromoter(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Reset database for the test.
+	if err := p.staticDB.Drop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some addresses.
+	var addr1 types.UnlockHash
+	fastrand.Read(addr1[:])
+	var addr2 types.UnlockHash
+	fastrand.Read(addr2[:])
+	var addr3 types.UnlockHash
+	fastrand.Read(addr3[:])
+
+	// Add addr3 twice.
+	addrs := []types.UnlockHash{addr1, addr2, addr3, addr3}
+
+	// Call Watch to add them.
+	for _, addr := range addrs {
+		if err := p.Watch(context.Background(), addr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Get addresses from db.
+	addrsMap := make(map[types.UnlockHash]struct{})
+	for _, addr := range addrs {
+		addrsMap[addr] = struct{}{}
+	}
+
+	dbAddrs, err := p.staticWatchedDBAddresses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check addresses.
+	if len(dbAddrs) != len(addrsMap) {
+		t.Fatalf("wrong number of addrs %v != %v", len(dbAddrs), len(addrsMap))
+	}
+	for _, addr := range dbAddrs {
+		_, exists := addrsMap[addr]
+		if !exists {
+			t.Fatal("addr doesn't exist")
+		}
+	}
+}
