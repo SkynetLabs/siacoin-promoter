@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.sia.tech/siad/types"
 )
 
 type (
@@ -84,4 +85,43 @@ func (p *Promoter) initBackgroundThreads(f updateFunc) {
 		defer p.wg.Done()
 		p.threadedAddressWatcher(p.bgCtx, f)
 	}()
+}
+
+// staticAddrDiff returns a diff of addresses that describes which addresses
+// need to be added and removed from skyd to match the state of the database.
+func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd, toRemove []types.UnlockHash, _ error) {
+	// Fetch addresses.
+	skydAddrs, err := p.staticWatchedSkydAddresses()
+	if err != nil {
+		return nil, nil, err
+	}
+	dbAddrs, err := p.staticWatchedDBAddresses(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Turn slices into maps.
+	skydAddrsMap := make(map[types.UnlockHash]struct{}, len(skydAddrs))
+	for _, addr := range skydAddrs {
+		skydAddrsMap[addr] = struct{}{}
+	}
+	dbAddrsMap := make(map[types.UnlockHash]struct{}, len(dbAddrs))
+	for _, addr := range dbAddrs {
+		dbAddrsMap[addr] = struct{}{}
+	}
+
+	// Create the diff.
+	for _, addr := range dbAddrs {
+		_, exists := skydAddrsMap[addr]
+		if !exists {
+			toAdd = append(toAdd, addr)
+		}
+	}
+	for _, addr := range skydAddrs {
+		_, exists := dbAddrsMap[addr]
+		if !exists {
+			toRemove = append(toRemove, addr)
+		}
+	}
+	return
 }

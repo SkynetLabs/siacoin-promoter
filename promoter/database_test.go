@@ -3,16 +3,12 @@ package promoter
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/SkynetLabs/siacoin-promoter/utils"
-	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/build"
-	"gitlab.com/SkynetLabs/skyd/siatest"
 	"go.sia.tech/siad/types"
 )
 
@@ -22,57 +18,6 @@ const (
 	testPassword = "aO4tV5tC1oU3oQ7u"
 	testURI      = "mongodb://localhost:37017"
 )
-
-// newTestPromoter creates a Promoter instance for testing.
-func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
-	// Create discard logger.
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	skyd, err := utils.NewSkydForTesting(name)
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword)
-	if err != nil {
-		return nil, nil, err
-	}
-	return p, skyd, nil
-}
-
-// newTestPromoterWithUpdateFunc creates a Promoter instance for testing.
-func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
-	// Create discard logger.
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	skyd, err := utils.NewSkydForTesting(name)
-	if err != nil {
-		return nil, nil, err
-	}
-	ctx := context.Background()
-	logEntry := logrus.NewEntry(logger)
-	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
-	if err != nil {
-		return nil, nil, err
-	}
-	p := newPromoter(context.Background(), &skyd.Client, logEntry, client)
-	p.initBackgroundThreads(f)
-	return p, skyd, nil
-}
-
-// TestPromoterHealth is a unit test for the promoter's Health method.
-func TestPromoterHealth(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	p, _, err := newTestPromoter(t.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ph := p.Health(); ph.Database != nil || ph.Skyd != nil {
-		t.Fatal("not healthy", ph)
-	}
-}
 
 // TestAddressWatcher is a unit test for threadedAddressWatcher.
 func TestAddressWatcher(t *testing.T) {
