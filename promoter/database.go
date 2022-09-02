@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -29,14 +29,14 @@ type (
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
 		// unique anyway.
-		Address crypto.Hash `bson:"_id"`
+		Address types.UnlockHash `bson:"_id"`
 	}
 
 	// WatchedAddressesUpdate describes an update to the watched address
 	// collection.
 	WatchedAddressesUpdate struct {
 		DocumentKey struct {
-			Address crypto.Hash `bson:"_id"`
+			Address types.UnlockHash `bson:"_id"`
 		} `bson:"documentKey"`
 		OperationType string `bson:"operationType"`
 	}
@@ -65,7 +65,7 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Watch(ctx context.Context, addr crypto.Hash) error {
+func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
 	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
 		Address: addr,
 	})
@@ -74,7 +74,7 @@ func (p *Promoter) Watch(ctx context.Context, addr crypto.Hash) error {
 
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Unwatch(ctx context.Context, addr crypto.Hash) error {
+func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
 	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
 		Address: addr,
 	})

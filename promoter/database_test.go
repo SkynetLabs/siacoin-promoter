@@ -13,7 +13,7 @@ import (
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/build"
 	"gitlab.com/SkynetLabs/skyd/siatest"
-	"go.sia.tech/siad/crypto"
+	"go.sia.tech/siad/types"
 )
 
 const (
@@ -59,8 +59,8 @@ func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siate
 	return p, skyd, nil
 }
 
-// TestHealth is a unit test for the promoter's Health method.
-func TestHealth(t *testing.T) {
+// TestPromoterHealth is a unit test for the promoter's Health method.
+func TestPromoterHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
@@ -80,8 +80,8 @@ func TestAddressWatcher(t *testing.T) {
 		t.SkipNow()
 	}
 
-	inserted := make(map[crypto.Hash]struct{})
-	deleted := make(map[crypto.Hash]struct{})
+	inserted := make(map[types.UnlockHash]struct{})
+	deleted := make(map[types.UnlockHash]struct{})
 	var mu sync.Mutex
 	f := func(update WatchedAddressesUpdate) {
 		mu.Lock()
@@ -117,9 +117,9 @@ func TestAddressWatcher(t *testing.T) {
 	}
 
 	// Add some addresses.
-	var addrs []crypto.Hash
+	var addrs []types.UnlockHash
 	for i := 0; i < 3; i++ {
-		var addr crypto.Hash
+		var addr types.UnlockHash
 		fastrand.Read(addr[:])
 		addrs = append(addrs, addr)
 
