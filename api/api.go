@@ -8,21 +8,19 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/SkynetLabs/siacoin-promoter/database"
+	"github.com/SkynetLabs/siacoin-promoter/promoter"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sirupsen/logrus"
-	"gitlab.com/SkynetLabs/skyd/node/api/client"
 )
 
 type (
 	// API manages the http API and all of its routes.
 	API struct {
-		staticDB       *database.Database
+		staticPromoter *promoter.Promoter
 		staticListener net.Listener
 		staticLog      *logrus.Entry
 		staticRouter   *httprouter.Router
 		staticServer   *http.Server
-		staticSkyd     *client.Client
 	}
 
 	// Error is the error type returned by the API in case the status code
@@ -44,7 +42,7 @@ func (err Error) Error() string {
 }
 
 // New creates a new API with the given logger and database.
-func New(log *logrus.Entry, db *database.Database, skydClient *client.Client, port int) (*API, error) {
+func New(log *logrus.Entry, p *promoter.Promoter, port int) (*API, error) {
 	l, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
 	if err != nil {
 		return nil, err
@@ -52,7 +50,7 @@ func New(log *logrus.Entry, db *database.Database, skydClient *client.Client, po
 	router := httprouter.New()
 	router.RedirectTrailingSlash = true
 	api := &API{
-		staticDB:       db,
+		staticPromoter: p,
 		staticListener: l,
 		staticLog:      log,
 		staticRouter:   router,
@@ -64,7 +62,6 @@ func New(log *logrus.Entry, db *database.Database, skydClient *client.Client, po
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       10 * time.Second,
 		},
-		staticSkyd: skydClient,
 	}
 	api.buildHTTPRoutes()
 	return api, nil

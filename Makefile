@@ -23,7 +23,7 @@ count = 1
 pkgs = \
 	./ \
 	./api \
-	./database \
+	./promoter \
 	./test
 
 # fmt calls go fmt on all packages.

@@ -6,8 +6,10 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/sirupsen/logrus v1.9.0
 	gitlab.com/NebulousLabs/errors v0.0.0-20200929122200-06c536cf6975
+	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40
 	gitlab.com/SkynetLabs/skyd v1.6.8
 	go.mongodb.org/mongo-driver v1.9.1
+	go.sia.tech/siad v1.5.9
 )
 
 require (
@@ -39,7 +41,6 @@ require (
 	gitlab.com/NebulousLabs/demotemutex v0.0.0-20151003192217-235395f71c40 // indirect
 	gitlab.com/NebulousLabs/encoding v0.0.0-20200604091946-456c3dc907fe // indirect
 	gitlab.com/NebulousLabs/entropy-mnemonics v0.0.0-20181018051301-7532f67e3500 // indirect
-	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40 // indirect
 	gitlab.com/NebulousLabs/go-upnp v0.0.0-20211002182029-11da932010b6 // indirect
 	gitlab.com/NebulousLabs/log v0.0.0-20210609172545-77f6775350e2 // indirect
 	gitlab.com/NebulousLabs/merkletree v0.0.0-20200118113624-07fbf710afc4 // indirect
@@ -51,7 +52,6 @@ require (
 	gitlab.com/NebulousLabs/writeaheadlog v0.0.0-20200618142844-c59a90f49130 // indirect
 	go.sia.tech/core v0.0.0-20220524010238-790a68db5817 // indirect
 	go.sia.tech/mux v1.0.1 // indirect
-	go.sia.tech/siad v1.5.9 // indirect
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa // indirect
 	golang.org/x/net v0.0.0-20220809184613-07c6da5e1ced // indirect
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f // indirect
