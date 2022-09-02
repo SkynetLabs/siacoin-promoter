@@ -18,12 +18,19 @@ import (
 const (
 	dbName                  = "siacoin-promoter"
 	colWatchedAddressesName = "watched_addresses"
+
+	operationTypeInsert = operationType("insert")
+	operationTypeDelete = operationType("delete")
 )
 
 type (
+	// operationType describes the operation type of an update to the
+	// watched addresses collection.
+	operationType string
+
 	// updateFunc is the type of a function that can be used as a callback
 	// in threadedAddressWatcher.
-	updateFunc func(WatchedAddressesUpdate)
+	updateFunc func(WatchedAddressUpdate)
 
 	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
@@ -33,15 +40,30 @@ type (
 		Address types.UnlockHash `bson:"_id"`
 	}
 
-	// WatchedAddressesUpdate describes an update to the watched address
-	// collection.
-	WatchedAddressesUpdate struct {
+	// WatchedAddressDBUpdate describes an update to the watched address
+	// collection in the db.
+	WatchedAddressDBUpdate struct {
 		DocumentKey struct {
 			Address types.UnlockHash `bson:"_id"`
 		} `bson:"documentKey"`
-		OperationType string `bson:"operationType"`
+		OperationType operationType `bson:"operationType"`
+	}
+
+	// WatchedAddressUpdate describes an update to the watched address
+	// collection in memory.
+	WatchedAddressUpdate struct {
+		Address       types.UnlockHash
+		OperationType operationType
 	}
 )
+
+// ToUpdate turns the WatchedAddressDBUpdate into a WatchedAddressUpdate.
+func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
+	return WatchedAddressUpdate{
+		Address:       u.DocumentKey.Address,
+		OperationType: u.OperationType,
+	}
+}
 
 // connect creates a new database object that is connected to a mongodb.
 func connect(ctx context.Context, log *logrus.Entry, uri, username, password string) (*mongo.Client, error) {
@@ -132,19 +154,36 @@ OUTER:
 			continue OUTER              // try again
 		}
 
-		// TODO: Fetch all watched addresses and compare them to skyd's
-		// watched addresses. We need to sync the database and skyd up
-		// before we can start relying on the change stream.
+		// Fetch the diff of watched addresses and send updates down the
+		// callback accordingly.
+		toAdd, toRemove, err := p.staticAddrDiff(ctx)
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch address diff")
+			time.Sleep(2 * time.Second) // sleep before retrying
+			continue OUTER              // try again
+		}
+		for _, addr := range toAdd {
+			f(WatchedAddressUpdate{
+				Address:       addr,
+				OperationType: operationTypeInsert,
+			})
+		}
+		for _, addr := range toRemove {
+			f(WatchedAddressUpdate{
+				Address:       addr,
+				OperationType: operationTypeDelete,
+			})
+		}
 
-		// Start listening for changes.
+		// Start listening for future changes.
 		for stream.Next(ctx) {
-			var wa WatchedAddressesUpdate
+			var wa WatchedAddressDBUpdate
 			if err := stream.Decode(&wa); err != nil {
 				p.staticLogger.WithError(err).Error("Failed to decode watched address")
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again
 			}
-			f(wa)
+			f(wa.ToUpdate())
 		}
 	}
 }

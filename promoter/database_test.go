@@ -28,18 +28,15 @@ func TestAddressWatcher(t *testing.T) {
 	inserted := make(map[types.UnlockHash]struct{})
 	deleted := make(map[types.UnlockHash]struct{})
 	var mu sync.Mutex
-	f := func(update WatchedAddressesUpdate) {
+	f := func(update WatchedAddressUpdate) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch update.OperationType {
-		case "insert":
-			inserted[update.DocumentKey.Address] = struct{}{}
-		case "delete":
-			deleted[update.DocumentKey.Address] = struct{}{}
-		case "drop":
-		case "invalidate":
+		case operationTypeInsert:
+			inserted[update.Address] = struct{}{}
+		case operationTypeDelete:
+			deleted[update.Address] = struct{}{}
 		default:
-			t.Error("unknown", update.OperationType)
 		}
 	}
 
@@ -117,6 +114,62 @@ func TestAddressWatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Add them back.
+	for _, addr := range addrs {
+		if err := p.Watch(context.Background(), addr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Prepare a new node that connects to the same db.
+	inserted2 := make(map[types.UnlockHash]struct{})
+	deleted2 := make(map[types.UnlockHash]struct{})
+	f2 := func(update WatchedAddressUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch update.OperationType {
+		case operationTypeInsert:
+			inserted2[update.Address] = struct{}{}
+		case operationTypeDelete:
+			deleted2[update.Address] = struct{}{}
+		default:
+		}
+	}
+	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node2.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p2.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// All addresses should be added on startup.
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		// Check that the callback was called the right number of times and with the
+		// right addresses.
+		if len(inserted2) != len(addrs) || len(deleted2) != 0 {
+			return fmt.Errorf("should have %v inserted (got %v) but 0 deleted (got %v)", len(addrs), len(inserted2), len(deleted2))
+		}
+		for _, addr := range addrs {
+			_, exists := inserted2[addr]
+			if !exists {
+				return fmt.Errorf("addr %v missing in inserted", addr)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 // TestWatchedDBAddresses is a unit test or staticWatchedDBAddresses.
