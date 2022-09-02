@@ -169,7 +169,6 @@ func TestAddressWatcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 }
 
 // TestWatchedDBAddresses is a unit test or staticWatchedDBAddresses.

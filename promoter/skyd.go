@@ -4,7 +4,7 @@ import "go.sia.tech/siad/types"
 
 // managedProcessAddressUpdate processes an update reported by
 // threadedAddressWatcher by forwarding it to skyd.
-func (db *Promoter) managedProcessAddressUpdate(update WatchedAddressUpdate) {
+func (p *Promoter) managedProcessAddressUpdate(update WatchedAddressUpdate) {
 	// TODO: implement
 }
 
