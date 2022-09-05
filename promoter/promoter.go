@@ -89,6 +89,8 @@ func (p *Promoter) initBackgroundThreads(f updateFunc) {
 
 // staticAddrDiff returns a diff of addresses that describes which addresses
 // need to be added and removed from skyd to match the state of the database.
+// Every skyd needs to watch all addresses from the watched address collection
+// in the database.
 func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd, toRemove []types.UnlockHash, _ error) {
 	// Fetch addresses.
 	skydAddrs, err := p.staticWatchedSkydAddresses()
