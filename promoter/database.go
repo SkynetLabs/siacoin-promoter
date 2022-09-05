@@ -30,7 +30,7 @@ type (
 
 	// updateFunc is the type of a function that can be used as a callback
 	// in threadedAddressWatcher.
-	updateFunc func(WatchedAddressUpdate)
+	updateFunc func(...WatchedAddressUpdate)
 
 	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
@@ -135,7 +135,7 @@ func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]types.Unlock
 
 // threadedAddressWatcher listens syncs skyd's and the database's watched
 // addresses and then continues listening for changes to the watched addresses.
-func (p *Promoter) threadedAddressWatcher(ctx context.Context, f updateFunc) {
+func (p *Promoter) threadedAddressWatcher(ctx context.Context, updateFn updateFunc) {
 	// NOTE: The outter loop is a fallback mechanism in case of an error.
 	// During successful operations it should only do one full iteration.
 OUTER:
@@ -162,18 +162,20 @@ OUTER:
 			time.Sleep(2 * time.Second) // sleep before retrying
 			continue OUTER              // try again
 		}
+		initialUpdates := make([]WatchedAddressUpdate, 0, len(toAdd)+len(toRemove))
 		for _, addr := range toAdd {
-			f(WatchedAddressUpdate{
+			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
 				Address:       addr,
 				OperationType: operationTypeInsert,
 			})
 		}
 		for _, addr := range toRemove {
-			f(WatchedAddressUpdate{
+			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
 				Address:       addr,
 				OperationType: operationTypeDelete,
 			})
 		}
+		updateFn(initialUpdates...)
 
 		// Start listening for future changes.
 		for stream.Next(ctx) {
@@ -183,7 +185,7 @@ OUTER:
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again
 			}
-			f(wa.ToUpdate())
+			updateFn(wa.ToUpdate())
 		}
 	}
 }

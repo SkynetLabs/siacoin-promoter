@@ -28,19 +28,22 @@ func TestAddressWatcher(t *testing.T) {
 	inserted := make(map[types.UnlockHash]struct{})
 	deleted := make(map[types.UnlockHash]struct{})
 	var mu sync.Mutex
-	f := func(update WatchedAddressUpdate) {
+	updateFn := func(updates ...WatchedAddressUpdate) {
 		mu.Lock()
 		defer mu.Unlock()
-		switch update.OperationType {
-		case operationTypeInsert:
-			inserted[update.Address] = struct{}{}
-		case operationTypeDelete:
-			deleted[update.Address] = struct{}{}
-		default:
+		for _, update := range updates {
+			switch update.OperationType {
+			case operationTypeInsert:
+				inserted[update.Address] = struct{}{}
+			case operationTypeDelete:
+				deleted[update.Address] = struct{}{}
+			default:
+				t.Fatal("unexpected operation type", update.OperationType)
+			}
 		}
 	}
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), f)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), updateFn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,15 +128,18 @@ func TestAddressWatcher(t *testing.T) {
 	// Prepare a new node that connects to the same db.
 	inserted2 := make(map[types.UnlockHash]struct{})
 	deleted2 := make(map[types.UnlockHash]struct{})
-	f2 := func(update WatchedAddressUpdate) {
+	f2 := func(updates ...WatchedAddressUpdate) {
 		mu.Lock()
 		defer mu.Unlock()
-		switch update.OperationType {
-		case operationTypeInsert:
-			inserted2[update.Address] = struct{}{}
-		case operationTypeDelete:
-			deleted2[update.Address] = struct{}{}
-		default:
+		for _, update := range updates {
+			switch update.OperationType {
+			case operationTypeInsert:
+				inserted2[update.Address] = struct{}{}
+			case operationTypeDelete:
+				deleted2[update.Address] = struct{}{}
+			default:
+				t.Fatal("unexpected operation type", update.OperationType)
+			}
 		}
 	}
 	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
