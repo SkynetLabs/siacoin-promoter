@@ -3,16 +3,12 @@ package promoter
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/SkynetLabs/siacoin-promoter/utils"
-	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/build"
-	"gitlab.com/SkynetLabs/skyd/siatest"
 	"go.sia.tech/siad/types"
 )
 
@@ -23,57 +19,6 @@ const (
 	testURI      = "mongodb://localhost:37017"
 )
 
-// newTestPromoter creates a Promoter instance for testing.
-func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
-	// Create discard logger.
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	skyd, err := utils.NewSkydForTesting(name)
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword)
-	if err != nil {
-		return nil, nil, err
-	}
-	return p, skyd, nil
-}
-
-// newTestPromoterWithUpdateFunc creates a Promoter instance for testing.
-func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
-	// Create discard logger.
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	skyd, err := utils.NewSkydForTesting(name)
-	if err != nil {
-		return nil, nil, err
-	}
-	ctx := context.Background()
-	logEntry := logrus.NewEntry(logger)
-	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
-	if err != nil {
-		return nil, nil, err
-	}
-	p := newPromoter(context.Background(), &skyd.Client, logEntry, client)
-	p.initBackgroundThreads(f)
-	return p, skyd, nil
-}
-
-// TestPromoterHealth is a unit test for the promoter's Health method.
-func TestPromoterHealth(t *testing.T) {
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	p, _, err := newTestPromoter(t.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ph := p.Health(); ph.Database != nil || ph.Skyd != nil {
-		t.Fatal("not healthy", ph)
-	}
-}
-
 // TestAddressWatcher is a unit test for threadedAddressWatcher.
 func TestAddressWatcher(t *testing.T) {
 	if testing.Short() {
@@ -83,22 +28,22 @@ func TestAddressWatcher(t *testing.T) {
 	inserted := make(map[types.UnlockHash]struct{})
 	deleted := make(map[types.UnlockHash]struct{})
 	var mu sync.Mutex
-	f := func(update WatchedAddressesUpdate) {
+	updateFn := func(updates ...WatchedAddressUpdate) {
 		mu.Lock()
 		defer mu.Unlock()
-		switch update.OperationType {
-		case "insert":
-			inserted[update.DocumentKey.Address] = struct{}{}
-		case "delete":
-			deleted[update.DocumentKey.Address] = struct{}{}
-		case "drop":
-		case "invalidate":
-		default:
-			t.Error("unknown", update.OperationType)
+		for _, update := range updates {
+			switch update.OperationType {
+			case operationTypeInsert:
+				inserted[update.Address] = struct{}{}
+			case operationTypeDelete:
+				deleted[update.Address] = struct{}{}
+			default:
+				t.Fatal("unexpected operation type", update.OperationType)
+			}
 		}
 	}
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), f)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), updateFn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,5 +116,128 @@ func TestAddressWatcher(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Add them back.
+	for _, addr := range addrs {
+		if err := p.Watch(context.Background(), addr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Prepare a new node that connects to the same db.
+	inserted2 := make(map[types.UnlockHash]struct{})
+	deleted2 := make(map[types.UnlockHash]struct{})
+	f2 := func(updates ...WatchedAddressUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, update := range updates {
+			switch update.OperationType {
+			case operationTypeInsert:
+				inserted2[update.Address] = struct{}{}
+			case operationTypeDelete:
+				deleted2[update.Address] = struct{}{}
+			default:
+				t.Fatal("unexpected operation type", update.OperationType)
+			}
+		}
+	}
+	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node2.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p2.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// All addresses should be added on startup.
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		// Check that the callback was called the right number of times and with the
+		// right addresses.
+		if len(inserted2) != len(addrs) || len(deleted2) != 0 {
+			return fmt.Errorf("should have %v inserted (got %v) but 0 deleted (got %v)", len(addrs), len(inserted2), len(deleted2))
+		}
+		for _, addr := range addrs {
+			_, exists := inserted2[addr]
+			if !exists {
+				return fmt.Errorf("addr %v missing in inserted", addr)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWatchedDBAddresses is a unit test or staticWatchedDBAddresses.
+func TestWatchedDBAddresses(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	p, node, err := newTestPromoter(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Reset database for the test.
+	if err := p.staticDB.Drop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some addresses.
+	var addr1 types.UnlockHash
+	fastrand.Read(addr1[:])
+	var addr2 types.UnlockHash
+	fastrand.Read(addr2[:])
+	var addr3 types.UnlockHash
+	fastrand.Read(addr3[:])
+
+	// Add addr3 twice.
+	addrs := []types.UnlockHash{addr1, addr2, addr3, addr3}
+
+	// Call Watch to add them.
+	for _, addr := range addrs {
+		if err := p.Watch(context.Background(), addr); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Get addresses from db.
+	addrsMap := make(map[types.UnlockHash]struct{})
+	for _, addr := range addrs {
+		addrsMap[addr] = struct{}{}
+	}
+
+	dbAddrs, err := p.staticWatchedDBAddresses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check addresses.
+	if len(dbAddrs) != len(addrsMap) {
+		t.Fatalf("wrong number of addrs %v != %v", len(dbAddrs), len(addrsMap))
+	}
+	for _, addr := range dbAddrs {
+		_, exists := addrsMap[addr]
+		if !exists {
+			t.Fatal("addr doesn't exist")
+		}
 	}
 }
