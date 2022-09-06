@@ -25,22 +25,23 @@ func TestAddressWatcher(t *testing.T) {
 		t.SkipNow()
 	}
 
-	inserted := make(map[types.UnlockHash]struct{})
+	inserted := make(map[types.UnlockHash]bool)
 	deleted := make(map[types.UnlockHash]struct{})
 	var mu sync.Mutex
-	updateFn := func(updates ...WatchedAddressUpdate) {
+	updateFn := func(unused bool, updates ...WatchedAddressUpdate) error {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, update := range updates {
 			switch update.OperationType {
 			case operationTypeInsert:
-				inserted[update.Address] = struct{}{}
+				inserted[update.Address] = unused
 			case operationTypeDelete:
 				deleted[update.Address] = struct{}{}
 			default:
 				t.Fatal("unexpected operation type", update.OperationType)
 			}
 		}
+		return nil
 	}
 
 	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), updateFn)
@@ -79,6 +80,11 @@ func TestAddressWatcher(t *testing.T) {
 		defer mu.Unlock()
 		if len(inserted) != len(addrs) {
 			return fmt.Errorf("not all addresses were inserted %v != %v", len(inserted), len(addrs))
+		}
+		for _, unused := range inserted {
+			if !unused {
+				t.Fatal("inserted address should be unused")
+			}
 		}
 		return nil
 	})
@@ -126,21 +132,22 @@ func TestAddressWatcher(t *testing.T) {
 	}
 
 	// Prepare a new node that connects to the same db.
-	inserted2 := make(map[types.UnlockHash]struct{})
-	deleted2 := make(map[types.UnlockHash]struct{})
-	f2 := func(updates ...WatchedAddressUpdate) {
+	inserted2 := make(map[types.UnlockHash]bool)
+	deleted2 := make(map[types.UnlockHash]bool)
+	f2 := func(unused bool, updates ...WatchedAddressUpdate) error {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, update := range updates {
 			switch update.OperationType {
 			case operationTypeInsert:
-				inserted2[update.Address] = struct{}{}
+				inserted2[update.Address] = unused
 			case operationTypeDelete:
-				deleted2[update.Address] = struct{}{}
+				deleted2[update.Address] = unused
 			default:
 				t.Fatal("unexpected operation type", update.OperationType)
 			}
 		}
+		return nil
 	}
 	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
 	if err != nil {
@@ -163,6 +170,11 @@ func TestAddressWatcher(t *testing.T) {
 		// right addresses.
 		if len(inserted2) != len(addrs) || len(deleted2) != 0 {
 			return fmt.Errorf("should have %v inserted (got %v) but 0 deleted (got %v)", len(addrs), len(inserted2), len(deleted2))
+		}
+		for _, unused := range inserted2 {
+			if !unused {
+				t.Fatal("inserted address should be unused")
+			}
 		}
 		for _, addr := range addrs {
 			_, exists := inserted2[addr]
@@ -235,7 +247,7 @@ func TestWatchedDBAddresses(t *testing.T) {
 		t.Fatalf("wrong number of addrs %v != %v", len(dbAddrs), len(addrsMap))
 	}
 	for _, addr := range dbAddrs {
-		_, exists := addrsMap[addr]
+		_, exists := addrsMap[addr.Address]
 		if !exists {
 			t.Fatal("addr doesn't exist")
 		}

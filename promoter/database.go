@@ -5,9 +5,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/errors"
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -21,6 +23,8 @@ const (
 
 	operationTypeInsert = operationType("insert")
 	operationTypeDelete = operationType("delete")
+
+	updateMaxBatchSize = 10000
 )
 
 type (
@@ -29,8 +33,22 @@ type (
 	operationType string
 
 	// updateFunc is the type of a function that can be used as a callback
-	// in threadedAddressWatcher.
-	updateFunc func(...WatchedAddressUpdate)
+	// in threadedAddressWatcher. Unused determines whether or not the
+	// 'unsed' flag is set in the API request for new addresses to watch.
+	// For deletions it will always be set to 'false'.
+	updateFunc func(unused bool, updates ...WatchedAddressUpdate) error
+
+	// User is the type of a user in the database.
+	// TODO: f/u with API endpoint for creating users and assigning
+	// addresses.
+	User struct {
+		ID  primitive.ObjectID `bson:"_id"`
+		Sub string             `bson:"sub"`
+
+		// TODO: f/u with a PR to poll for transactions. Store them in a
+		// transactions array together with the amount of incoming funds
+		// after the promoter service was notified of the new txn.
+	}
 
 	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
@@ -38,6 +56,14 @@ type (
 		// of the object since the addresses should be indexed and
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
+
+		// UserID is the user that the address is assigned to. 0 if the
+		// address is unused.
+		// TODO: f/u with PR to create addresses without users ahead of
+		// time.
+		// TODO: Also add a field that tells us which server generated
+		// the address.
+		UserID primitive.ObjectID `bson:"user_id"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -46,7 +72,8 @@ type (
 		DocumentKey struct {
 			Address types.UnlockHash `bson:"_id"`
 		} `bson:"documentKey"`
-		OperationType operationType `bson:"operationType"`
+		FullDocument  WatchedAddress `bson:"fullDocument"`
+		OperationType operationType  `bson:"operationType"`
 	}
 
 	// WatchedAddressUpdate describes an update to the watched address
@@ -63,6 +90,12 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 		Address:       u.DocumentKey.Address,
 		OperationType: u.OperationType,
 	}
+}
+
+// Unused returns whether the watched address is currently not assigned to a
+// user.
+func (w *WatchedAddress) Unused() bool {
+	return w.UserID.IsZero()
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -117,18 +150,18 @@ func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 
 // staticWatchedDBAddresses returns all watched addresses as seen in the
 // database.
-func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]types.UnlockHash, error) {
+func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]WatchedAddress, error) {
 	c, err := p.staticColWatchedAddresses().Find(ctx, bson.D{})
 	if err != nil {
 		return nil, err
 	}
-	var addrs []types.UnlockHash
+	var addrs []WatchedAddress
 	for c.Next(ctx) {
 		var addr WatchedAddress
 		if err := c.Decode(&addr); err != nil {
 			return nil, err
 		}
-		addrs = append(addrs, addr.Address)
+		addrs = append(addrs, addr)
 	}
 	return addrs, nil
 }
@@ -162,30 +195,77 @@ OUTER:
 			time.Sleep(2 * time.Second) // sleep before retrying
 			continue OUTER              // try again
 		}
-		initialUpdates := make([]WatchedAddressUpdate, 0, len(toAdd)+len(toRemove))
+		toRemoveUpdates := make([]WatchedAddressUpdate, 0, len(toRemove))
+		toAddUpdates := make([]WatchedAddressUpdate, 0, len(toAdd))
+
+		// Track whether any of the addresses to be added is considered
+		// used. If any of them are, we need to call updateFn with
+		// unused = false to make sure we trigger a blockchain rescan in
+		// skyd to pick up on potential transactions from the past.
+		unused := true
+
 		for _, addr := range toAdd {
-			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
-				Address:       addr,
+			unused = unused && addr.Unused()
+			toAddUpdates = append(toAddUpdates, WatchedAddressUpdate{
+				Address:       addr.Address,
 				OperationType: operationTypeInsert,
 			})
 		}
 		for _, addr := range toRemove {
-			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
+			toRemoveUpdates = append(toRemoveUpdates, WatchedAddressUpdate{
 				Address:       addr,
 				OperationType: operationTypeDelete,
 			})
 		}
-		updateFn(initialUpdates...)
 
-		// Start listening for future changes.
+		// To avoid resyncing skyd's wallet too often, we check all
+		// possible edge cases and make sure we only call updateFn with
+		// unused = false once.
+		if len(toAddUpdates) > 0 && len(toRemoveUpdates) == 0 {
+			err = updateFn(unused, toAddUpdates...)
+		} else if len(toAddUpdates) == 0 && len(toRemoveUpdates) > 0 {
+			err = updateFn(false, toRemoveUpdates...)
+		} else if len(toAddUpdates) > 0 && len(toRemoveUpdates) > 0 {
+			err1 := updateFn(true, toRemoveUpdates...)
+			err2 := updateFn(false, toAddUpdates...)
+			err = errors.Compose(err1, err2)
+		}
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to update skyd with initial diff")
+			time.Sleep(2 * time.Second) // sleep before retrying
+			continue OUTER              // try again
+		}
+
+		// Start listening for future changes. We block for a change
+		// first and then we check for more changes in a non-blocking
+		// fashion up until a certain batch size. That way we reduce the
+		// number of requests to skyd.
 		for stream.Next(ctx) {
-			var wa WatchedAddressDBUpdate
-			if err := stream.Decode(&wa); err != nil {
-				p.staticLogger.WithError(err).Error("Failed to decode watched address")
+			var updates []WatchedAddressUpdate
+			unused = true // track if any addresses are used as before.
+			for {
+				// Decode the entry.
+				var wa WatchedAddressDBUpdate
+				if err := stream.Decode(&wa); err != nil {
+					p.staticLogger.WithError(err).Error("Failed to decode watched address")
+					time.Sleep(2 * time.Second) // sleep before retrying
+					continue OUTER              // try again
+				}
+				unused = unused && wa.FullDocument.Unused()
+				updates = append(updates, wa.ToUpdate())
+
+				// Check if there is more. If not, we continue
+				// the blocking loop.
+				if len(updates) == updateMaxBatchSize || !stream.TryNext(ctx) {
+					break
+				}
+			}
+			// Apply the updates.
+			if err := updateFn(unused, updates...); err != nil {
+				p.staticLogger.WithError(err).Error("Failed to update skyd with incoming change")
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again
 			}
-			updateFn(wa.ToUpdate())
 		}
 	}
 }

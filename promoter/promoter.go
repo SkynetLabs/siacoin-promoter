@@ -91,7 +91,7 @@ func (p *Promoter) initBackgroundThreads(f updateFunc) {
 // need to be added and removed from skyd to match the state of the database.
 // Every skyd needs to watch all addresses from the watched address collection
 // in the database.
-func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd, toRemove []types.UnlockHash, _ error) {
+func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd []WatchedAddress, toRemove []types.UnlockHash, _ error) {
 	// Fetch addresses.
 	skydAddrs, err := p.staticWatchedSkydAddresses()
 	if err != nil {
@@ -107,14 +107,14 @@ func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd, toRemove []types.
 	for _, addr := range skydAddrs {
 		skydAddrsMap[addr] = struct{}{}
 	}
-	dbAddrsMap := make(map[types.UnlockHash]struct{}, len(dbAddrs))
+	dbAddrsMap := make(map[types.UnlockHash]WatchedAddress, len(dbAddrs))
 	for _, addr := range dbAddrs {
-		dbAddrsMap[addr] = struct{}{}
+		dbAddrsMap[addr.Address] = addr
 	}
 
 	// Create the diff.
 	for _, addr := range dbAddrs {
-		_, exists := skydAddrsMap[addr]
+		_, exists := skydAddrsMap[addr.Address]
 		if !exists {
 			toAdd = append(toAdd, addr)
 		}

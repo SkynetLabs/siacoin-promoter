@@ -69,7 +69,10 @@ func TestAddrDiff(t *testing.T) {
 		t.SkipNow()
 	}
 
-	p, node, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
+		// Don't do anything.
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +123,11 @@ func TestAddrDiff(t *testing.T) {
 	if len(toRemove) != 1 {
 		t.Fatal("should have one address to remove", toRemove)
 	}
-	if toAdd[0] != addr1 {
+	if toAdd[0].Address != addr1 {
 		t.Fatal("addr1 should be the one to add")
+	}
+	if toAdd[0].Unused() != true {
+		t.Fatal("addr1 should be unused")
 	}
 	if toRemove[0] != addr3 {
 		t.Fatal("addr3 should be the one to remove")
