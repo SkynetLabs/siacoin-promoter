@@ -69,7 +69,10 @@ func TestAddrDiff(t *testing.T) {
 		t.SkipNow()
 	}
 
-	p, node, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
+		// Don't do anything.
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
