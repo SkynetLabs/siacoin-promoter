@@ -7,6 +7,7 @@ import (
 
 	"github.com/SkynetLabs/siacoin-promoter/utils"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/siatest"
 	"go.sia.tech/siad/types"
@@ -43,7 +44,10 @@ func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siate
 	if err != nil {
 		return nil, nil, err
 	}
-	p := newPromoter(context.Background(), &skyd.Client, logEntry, client)
+	p, err := newPromoter(context.Background(), &skyd.Client, logEntry, client)
+	if err != nil {
+		return nil, nil, errors.Compose(err, client.Disconnect(ctx))
+	}
 	p.initBackgroundThreads(f)
 	return p, skyd, nil
 }

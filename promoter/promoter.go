@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+	lock "github.com/square/mongo-lock"
+	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.sia.tech/siad/types"
@@ -28,6 +30,12 @@ type (
 		staticDB     *mongo.Database
 		staticLogger *logrus.Entry
 
+		// The lock client is used for locing the creation of new
+		// addresses withing the watched addresses collection. Only if
+		// an exclusive lock is acquired, new addresses are allowed to
+		// be inserted or the length of the collection be requested.
+		staticLockClient *lock.Client
+
 		staticSkyd *client.Client
 
 		ctx          context.Context
@@ -43,13 +51,16 @@ func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, usern
 	if err != nil {
 		return nil, err
 	}
-	p := newPromoter(ctx, skyd, log, client)
+	p, err := newPromoter(ctx, skyd, log, client)
+	if err != nil {
+		return nil, err
+	}
 	p.initBackgroundThreads(p.managedProcessAddressUpdate)
 	return p, nil
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client) *Promoter {
+func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client) (*Promoter, error) {
 	// Grab database from client.
 	database := client.Database(dbName)
 
@@ -57,7 +68,7 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 	bgCtx, cancel := context.WithCancel(ctx)
 
 	// Create store.
-	return &Promoter{
+	p := &Promoter{
 		bgCtx:        bgCtx,
 		threadCancel: cancel,
 		ctx:          ctx,
@@ -65,6 +76,15 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 		staticLogger: log,
 		staticSkyd:   skyd,
 	}
+
+	// Create lock client.
+	lockClient := lock.NewClient(p.staticColLocks())
+	err := lockClient.CreateIndexes(ctx)
+	if err != nil {
+		return nil, errors.Compose(err, p.Close())
+	}
+	p.staticLockClient = lockClient
+	return p, nil
 }
 
 // Health returns some health information about the promoter.

@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
+	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,12 +21,43 @@ import (
 
 const (
 	dbName                  = "siacoin-promoter"
+	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
 
 	operationTypeInsert = operationType("insert")
 	operationTypeDelete = operationType("delete")
+)
 
-	updateMaxBatchSize = 10000
+// filterUnusedAddresses is the filter used by queries interested in the number
+// of addressed not assigned to any user.
+var filterUnusedAddresses = bson.M{
+	"$or": bson.A{
+		bson.M{"user": bson.M{"$exists": false}}, // field is not set
+		bson.M{"user": primitive.NilObjectID},    // field is set to default value
+	},
+}
+
+var (
+	// minUnusedAddresses is the min number of addresses we want to keep in the
+	// db which are not yet assinged to users. If the number drops below
+	// this, we generate more addresses.
+	minUnusedAddresses = build.Select(build.Var{
+		Testing:  int64(5),
+		Dev:      int64(50),
+		Standard: int64(5000),
+	}).(int64)
+
+	// maxUnusedAddresses is the max number of addresses we want to keep in
+	// the db which are not yet assinged to users.
+	maxUnusedAddresses = build.Select(build.Var{
+		Testing:  int64(10),
+		Dev:      int64(100),
+		Standard: int64(10000),
+	}).(int64)
+
+	// updateMaxBatchSize is the max number of addresses we send to skyd
+	// within a single API request.
+	updateMaxBatchSize = minUnusedAddresses
 )
 
 type (
@@ -119,27 +152,9 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 	return client, nil
 }
 
-// Watch watches an address by adding it to the database.
-// threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
-		Address: addr,
-	})
-	if mongo.IsDuplicateKeyError(err) {
-		// nothing to do, the ChangeStream should've picked up on that
-		// already.
-		return nil
-	}
-	return err
-}
-
-// Unwatch unwatches an address by removing it from the database.
-// threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
-		Address: addr,
-	})
-	return err
+// staticColLocks returns the collection used to store locks.
+func (p *Promoter) staticColLocks() *mongo.Collection {
+	return p.staticDB.Collection(colLocksName)
 }
 
 // staticColWatchedAddresses returns the collection used to store watched
@@ -250,7 +265,7 @@ OUTER:
 
 				// Check if there is more. If not, we continue
 				// the blocking loop.
-				if len(updates) == updateMaxBatchSize || !stream.TryNext(ctx) {
+				if int64(len(updates)) == updateMaxBatchSize || !stream.TryNext(ctx) {
 					break
 				}
 			}
@@ -262,6 +277,35 @@ OUTER:
 			}
 		}
 	}
+}
+
+// staticShouldGenerateAddresses returns whether or not we should try to
+// generate new addresses. This method doesn't use any locking to provide a
+// quick way to estimate whether we might need to generate new addresses. The
+// actual address generating code should lock the collection, fetch the actual
+// number of addresses and add new ones accordingly.
+func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
+	if err != nil {
+		return false, err
+	}
+	return n < minUnusedAddresses, nil
+}
+
+func (p *Promoter) foo() {
+	err := p.staticLockClient.XLock(p.bgCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
+		Owner: "siacoin-promoter",
+		Host:  "TODO:servername",
+		TTL:   300, // 5 minutes
+
+	})
+	if err == lock.ErrAlreadyLocked {
+		return // nothing to do
+	}
+
+	// TODO: check number of unused addresses.
+
+	// TODO: create missing addresses.
 }
 
 // Close closes the connection to the database.

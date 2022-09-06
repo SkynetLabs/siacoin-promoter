@@ -9,6 +9,8 @@ import (
 
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/build"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.sia.tech/siad/types"
 )
 
@@ -18,6 +20,29 @@ const (
 	testPassword = "aO4tV5tC1oU3oQ7u"
 	testURI      = "mongodb://localhost:37017"
 )
+
+// Watch watches an address by adding it to the database.
+// threadedAddressWatcher will then pick up on that change and apply it to skyd.
+func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
+	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
+		Address: addr,
+	})
+	if mongo.IsDuplicateKeyError(err) {
+		// nothing to do, the ChangeStream should've picked up on that
+		// already.
+		return nil
+	}
+	return err
+}
+
+// Unwatch unwatches an address by removing it from the database.
+// threadedAddressWatcher will then pick up on that change and apply it to skyd.
+func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
+	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
+		Address: addr,
+	})
+	return err
+}
 
 // TestAddressWatcher is a unit test for threadedAddressWatcher.
 func TestAddressWatcher(t *testing.T) {
@@ -251,5 +276,70 @@ func TestWatchedDBAddresses(t *testing.T) {
 		if !exists {
 			t.Fatal("addr doesn't exist")
 		}
+	}
+}
+
+// TestShouldGenerateAddresses is a unit test for staticShouldGenerateAddresses.
+func TestShouldGenerateAddresses(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+
+	p, node, err := newTestPromoter(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Reset database for the test.
+	if err := p.staticDB.Drop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case exactly minUnusedAddresses. We alternate between inserting
+	// addresses with no user field and addresses with a user field set to
+	// the default value to make sure the methods counts both.
+	for i := 0; i < int(minUnusedAddresses); i++ {
+		var addr types.UnlockHash
+		fastrand.Read(addr[:])
+		if i%2 == 0 {
+			_, err = p.staticColWatchedAddresses().InsertOne(context.Background(), WatchedAddress{
+				Address: addr,
+			})
+		} else {
+			_, err = p.staticColWatchedAddresses().InsertOne(context.Background(), bson.M{
+				"_id": addr.String(),
+			})
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	shouldGenerate, err := p.staticShouldGenerateAddresses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shouldGenerate {
+		t.Fatal("should not generate new addresses")
+	}
+
+	// Delete any element.
+	_, err = p.staticColWatchedAddresses().DeleteOne(context.Background(), bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shouldGenerate, err = p.staticShouldGenerateAddresses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !shouldGenerate {
+		t.Fatal("should generate new addresses")
 	}
 }
