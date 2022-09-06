@@ -298,7 +298,11 @@ func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
 	return n < minUnusedAddresses, nil
 }
 
-func (p *Promoter) foo() {
+// threadedGenerateAddresses checks whether new addresses need to be generated
+// and then generates enough addresses to restore the pool of unused addresses
+// to maxUnusedAddresses.
+func (p *Promoter) threadedGenerateAddresses() {
+	// Lock the collection.
 	err := p.staticLockClient.XLock(p.bgCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
 		Owner: "siacoin-promoter",
 		Host:  "TODO:servername",
@@ -306,12 +310,53 @@ func (p *Promoter) foo() {
 
 	})
 	if err == lock.ErrAlreadyLocked {
+		p.staticLogger.Debug("Not generating new addresses because the collection is already locked")
 		return // nothing to do
 	}
 
-	// TODO: check number of unused addresses.
+	// Unlock when we are done.
+	defer func() {
+		if _, err := p.staticLockClient.Unlock(p.bgCtx, "watched-addresses"); err != nil {
+			p.staticLogger.WithError(err).Error("Failed to unlock lock over watched addresses collection")
+		}
+	}()
 
-	// TODO: create missing addresses.
+	// TODO: check number of unused addresses.
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses)
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to fetch count of unused addresses for generating new ones")
+		return
+	}
+
+	// Figure out how many to generate.
+	toGenerate := maxUnusedAddresses - n
+	if toGenerate <= 0 {
+		p.staticLogger.WithField("toGenerate", toGenerate).Debug("Not generating new addresses because the collection has enough")
+		return // nothing to do
+	}
+
+	p.staticLogger.WithField("toGenerate", toGenerate).Info("Starting to generate new addresses")
+
+	// Generate the new addresses. We have to do this one-by-one since skyd
+	// doesn't have an endpoint for address batch creation.
+	newAddresses := make([]interface{}, 0, toGenerate)
+	for i := int64(0); i < toGenerate; i++ {
+		wag, err := p.staticSkyd.WalletAddressGet()
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch new address from skyd")
+			return
+		}
+		newAddresses = append(newAddresses, &WatchedAddress{
+			Address: wag.Address,
+		})
+	}
+
+	// Insert them into the db.
+	_, err = p.staticColWatchedAddresses().InsertMany(p.bgCtx, newAddresses)
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to store generated address in db.")
+		return
+	}
 }
 
 // Close closes the connection to the database.
