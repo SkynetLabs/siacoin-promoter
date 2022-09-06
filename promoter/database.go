@@ -23,6 +23,8 @@ const (
 
 	operationTypeInsert = operationType("insert")
 	operationTypeDelete = operationType("delete")
+
+	updateMaxBatchSize = 10000
 )
 
 type (
@@ -42,9 +44,8 @@ type (
 	}
 
 	// WatchedAddressInsert describes an entry in the watched address
-	// collection as seen during insertion. The User field is an ObjectID in
-	// this case to only reference a User and not duplicate the data.
-	WatchedAddressInsert struct {
+	// collection.
+	WatchedAddress struct {
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
 		// unique anyway.
@@ -55,28 +56,14 @@ type (
 		User primitive.ObjectID `bson:"user"`
 	}
 
-	// WatchedAddressRead is the same as WatchedAddressInsert but instead of
-	// an ID it has a full User for the User field. That way Mongo resolves
-	// the reference.
-	WatchedAddressRead struct {
-		// Address is the actual address we track. We make that the _id
-		// of the object since the addresses should be indexed and
-		// unique anyway.
-		Address types.UnlockHash `bson:"_id"`
-
-		// User is the user that the address is assigned to. 0 if the
-		// address is unused.
-		User User `bson:"user"`
-	}
-
 	// WatchedAddressDBUpdate describes an update to the watched address
 	// collection in the db.
 	WatchedAddressDBUpdate struct {
 		DocumentKey struct {
 			Address types.UnlockHash `bson:"_id"`
 		} `bson:"documentKey"`
-		FullDocument  WatchedAddressRead `bson:"fullDocument"`
-		OperationType operationType      `bson:"operationType"`
+		FullDocument  WatchedAddress `bson:"fullDocument"`
+		OperationType operationType  `bson:"operationType"`
 	}
 
 	// WatchedAddressUpdate describes an update to the watched address
@@ -97,8 +84,8 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 
 // Unused returns whether the watched address is currently not assigned to a
 // user.
-func (w *WatchedAddressRead) Unused() bool {
-	return w.User.ID.IsZero()
+func (w *WatchedAddress) Unused() bool {
+	return w.User.IsZero()
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -125,7 +112,7 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddressInsert{
+	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	if mongo.IsDuplicateKeyError(err) {
@@ -139,7 +126,7 @@ func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddressInsert{
+	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
 		Address: addr,
 	})
 	return err
@@ -153,14 +140,14 @@ func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 
 // staticWatchedDBAddresses returns all watched addresses as seen in the
 // database.
-func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]WatchedAddressRead, error) {
+func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]WatchedAddress, error) {
 	c, err := p.staticColWatchedAddresses().Find(ctx, bson.D{})
 	if err != nil {
 		return nil, err
 	}
-	var addrs []WatchedAddressRead
+	var addrs []WatchedAddress
 	for c.Next(ctx) {
-		var addr WatchedAddressRead
+		var addr WatchedAddress
 		if err := c.Decode(&addr); err != nil {
 			return nil, err
 		}
@@ -233,18 +220,32 @@ OUTER:
 			continue OUTER              // try again
 		}
 
-		// Start listening for future changes.
+		// Start listening for future changes. We block for a change
+		// first and then we check for more changes in a non-blocking
+		// fashion up until a certain batch size. That way we reduce the
+		// number of requests to skyd.
 		for stream.Next(ctx) {
-			var wa WatchedAddressDBUpdate
-			if err := stream.Decode(&wa); err != nil {
-				p.staticLogger.WithError(err).Error("Failed to decode watched address")
-				time.Sleep(2 * time.Second) // sleep before retrying
-				continue OUTER              // try again
+			var updates []WatchedAddressUpdate
+			unused = true
+			for {
+				// Decode the entry.
+				var wa WatchedAddressDBUpdate
+				if err := stream.Decode(&wa); err != nil {
+					p.staticLogger.WithError(err).Error("Failed to decode watched address")
+					time.Sleep(2 * time.Second) // sleep before retrying
+					continue OUTER              // try again
+				}
+				unused = unused && wa.FullDocument.Unused()
+				updates = append(updates, wa.ToUpdate())
+
+				// Check if there is more. If not, we continue
+				// the blocking loop.
+				if len(updates) == updateMaxBatchSize || !stream.TryNext(ctx) {
+					break
+				}
 			}
-			// If the update doesn't contain a user id for the
-			// address, we consider it unused.
-			unused := wa.FullDocument.Unused()
-			if err := updateFn(unused, wa.ToUpdate()); err != nil {
+			// Apply the updates.
+			if err := updateFn(unused, updates...); err != nil {
 				p.staticLogger.WithError(err).Error("Failed to update skyd with incoming change")
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again

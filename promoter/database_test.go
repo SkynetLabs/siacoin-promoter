@@ -172,8 +172,8 @@ func TestAddressWatcher(t *testing.T) {
 			return fmt.Errorf("should have %v inserted (got %v) but 0 deleted (got %v)", len(addrs), len(inserted2), len(deleted2))
 		}
 		for _, unused := range inserted2 {
-			if unused {
-				t.Fatal("inserted address should be used")
+			if !unused {
+				t.Fatal("inserted address should be unused")
 			}
 		}
 		for _, addr := range addrs {
