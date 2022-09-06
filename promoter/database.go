@@ -5,9 +5,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/errors"
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -29,15 +31,42 @@ type (
 	operationType string
 
 	// updateFunc is the type of a function that can be used as a callback
-	// in threadedAddressWatcher.
-	updateFunc func(...WatchedAddressUpdate)
+	// in threadedAddressWatcher. Unused determines whether or not the
+	// 'unsed' flag is set in the API request for new addresses to watch.
+	// For deletions it will always be set to 'false'.
+	updateFunc func(unused bool, updates ...WatchedAddressUpdate) error
 
-	// WatchedAddress describes an entry in the watched address collection.
-	WatchedAddress struct {
+	User struct {
+		ID  primitive.ObjectID `bson:"_id"`
+		Sub string             `bson:"sub"`
+	}
+
+	// WatchedAddressInsert describes an entry in the watched address
+	// collection as seen during insertion. The User field is an ObjectID in
+	// this case to only reference a User and not duplicate the data.
+	WatchedAddressInsert struct {
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
+
+		// User is the user that the address is assigned to. 0 if the
+		// address is unused.
+		User primitive.ObjectID `bson:"user"`
+	}
+
+	// WatchedAddressRead is the same as WatchedAddressInsert but instead of
+	// an ID it has a full User for the User field. That way Mongo resolves
+	// the reference.
+	WatchedAddressRead struct {
+		// Address is the actual address we track. We make that the _id
+		// of the object since the addresses should be indexed and
+		// unique anyway.
+		Address types.UnlockHash `bson:"_id"`
+
+		// User is the user that the address is assigned to. 0 if the
+		// address is unused.
+		User User `bson:"user"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -46,7 +75,8 @@ type (
 		DocumentKey struct {
 			Address types.UnlockHash `bson:"_id"`
 		} `bson:"documentKey"`
-		OperationType operationType `bson:"operationType"`
+		FullDocument  WatchedAddressRead `bson:"fullDocument"`
+		OperationType operationType      `bson:"operationType"`
 	}
 
 	// WatchedAddressUpdate describes an update to the watched address
@@ -63,6 +93,12 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 		Address:       u.DocumentKey.Address,
 		OperationType: u.OperationType,
 	}
+}
+
+// Unused returns whether the watched address is currently not assigned to a
+// user.
+func (w *WatchedAddressRead) Unused() bool {
+	return w.User.ID.IsZero()
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -89,7 +125,7 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
+	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddressInsert{
 		Address: addr,
 	})
 	if mongo.IsDuplicateKeyError(err) {
@@ -103,7 +139,7 @@ func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
+	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddressInsert{
 		Address: addr,
 	})
 	return err
@@ -117,18 +153,18 @@ func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 
 // staticWatchedDBAddresses returns all watched addresses as seen in the
 // database.
-func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]types.UnlockHash, error) {
+func (p *Promoter) staticWatchedDBAddresses(ctx context.Context) ([]WatchedAddressRead, error) {
 	c, err := p.staticColWatchedAddresses().Find(ctx, bson.D{})
 	if err != nil {
 		return nil, err
 	}
-	var addrs []types.UnlockHash
+	var addrs []WatchedAddressRead
 	for c.Next(ctx) {
-		var addr WatchedAddress
+		var addr WatchedAddressRead
 		if err := c.Decode(&addr); err != nil {
 			return nil, err
 		}
-		addrs = append(addrs, addr.Address)
+		addrs = append(addrs, addr)
 	}
 	return addrs, nil
 }
@@ -162,20 +198,40 @@ OUTER:
 			time.Sleep(2 * time.Second) // sleep before retrying
 			continue OUTER              // try again
 		}
-		initialUpdates := make([]WatchedAddressUpdate, 0, len(toAdd)+len(toRemove))
+		toRemoveUpdates := make([]WatchedAddressUpdate, 0, len(toRemove))
+		toAddUpdates := make([]WatchedAddressUpdate, 0, len(toAdd))
+		unused := true
 		for _, addr := range toAdd {
-			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
-				Address:       addr,
+			unused = unused && addr.Unused()
+			toAddUpdates = append(toAddUpdates, WatchedAddressUpdate{
+				Address:       addr.Address,
 				OperationType: operationTypeInsert,
 			})
 		}
 		for _, addr := range toRemove {
-			initialUpdates = append(initialUpdates, WatchedAddressUpdate{
+			toRemoveUpdates = append(toRemoveUpdates, WatchedAddressUpdate{
 				Address:       addr,
 				OperationType: operationTypeDelete,
 			})
 		}
-		updateFn(initialUpdates...)
+
+		// To avoid resyncing skyd's wallet too often, we check all
+		// possible edge cases and make sure we only call updateFn with
+		// unused = false once.
+		if len(toAddUpdates) > 0 && len(toRemoveUpdates) == 0 {
+			err = updateFn(unused, toAddUpdates...)
+		} else if len(toAddUpdates) == 0 && len(toRemoveUpdates) > 0 {
+			err = updateFn(false, toRemoveUpdates...)
+		} else if len(toAddUpdates) > 0 && len(toRemoveUpdates) > 0 {
+			err1 := updateFn(true, toRemoveUpdates...)
+			err2 := updateFn(false, toAddUpdates...)
+			err = errors.Compose(err1, err2)
+		}
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to update skyd with initial diff")
+			time.Sleep(2 * time.Second) // sleep before retrying
+			continue OUTER              // try again
+		}
 
 		// Start listening for future changes.
 		for stream.Next(ctx) {
@@ -185,7 +241,14 @@ OUTER:
 				time.Sleep(2 * time.Second) // sleep before retrying
 				continue OUTER              // try again
 			}
-			updateFn(wa.ToUpdate())
+			// If the update doesn't contain a user id for the
+			// address, we consider it unused.
+			unused := wa.FullDocument.Unused()
+			if err := updateFn(unused, wa.ToUpdate()); err != nil {
+				p.staticLogger.WithError(err).Error("Failed to update skyd with incoming change")
+				time.Sleep(2 * time.Second) // sleep before retrying
+				continue OUTER              // try again
+			}
 		}
 	}
 }
