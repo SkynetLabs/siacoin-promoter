@@ -38,13 +38,19 @@ type (
 	// For deletions it will always be set to 'false'.
 	updateFunc func(unused bool, updates ...WatchedAddressUpdate) error
 
+	// User is the type of a user in the database.
+	// TODO: f/u with API endpoint for creating users and assigning
+	// addresses.
 	User struct {
 		ID  primitive.ObjectID `bson:"_id"`
 		Sub string             `bson:"sub"`
+
+		// TODO: f/u with a PR to poll for transactions. Store them in a
+		// transactions array together with the amount of incoming funds
+		// after the promoter service was notified of the new txn.
 	}
 
-	// WatchedAddressInsert describes an entry in the watched address
-	// collection.
+	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
@@ -53,6 +59,10 @@ type (
 
 		// User is the user that the address is assigned to. 0 if the
 		// address is unused.
+		// TODO: f/u with PR to create addresses without users ahead of
+		// time.
+		// TODO: Also add a field that tells us which server generated
+		// the address.
 		User primitive.ObjectID `bson:"user"`
 	}
 
