@@ -57,13 +57,13 @@ type (
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
 
-		// User is the user that the address is assigned to. 0 if the
+		// UserID is the user that the address is assigned to. 0 if the
 		// address is unused.
 		// TODO: f/u with PR to create addresses without users ahead of
 		// time.
 		// TODO: Also add a field that tells us which server generated
 		// the address.
-		User primitive.ObjectID `bson:"user"`
+		UserID primitive.ObjectID `bson:"user_id"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -95,7 +95,7 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 // Unused returns whether the watched address is currently not assigned to a
 // user.
 func (w *WatchedAddress) Unused() bool {
-	return w.User.IsZero()
+	return w.UserID.IsZero()
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -197,7 +197,13 @@ OUTER:
 		}
 		toRemoveUpdates := make([]WatchedAddressUpdate, 0, len(toRemove))
 		toAddUpdates := make([]WatchedAddressUpdate, 0, len(toAdd))
+
+		// Track whether any of the addresses to be added is considered
+		// used. If any of them are, we need to call updateFn with
+		// unused = false to make sure we trigger a blockchain rescan in
+		// skyd to pick up on potential transactions from the past.
 		unused := true
+
 		for _, addr := range toAdd {
 			unused = unused && addr.Unused()
 			toAddUpdates = append(toAddUpdates, WatchedAddressUpdate{
@@ -236,7 +242,7 @@ OUTER:
 		// number of requests to skyd.
 		for stream.Next(ctx) {
 			var updates []WatchedAddressUpdate
-			unused = true
+			unused = true // track if any addresses are used as before.
 			for {
 				// Decode the entry.
 				var wa WatchedAddressDBUpdate
