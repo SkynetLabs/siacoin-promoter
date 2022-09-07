@@ -15,7 +15,7 @@ func TestParseConfig(t *testing.T) {
 	// Testing helpers.
 	//
 	// Sets the environment to sane values
-	uri, user, password, logLevel := "URI", "user", "password", logrus.ErrorLevel
+	uri, user, password, logLevel, serverDomain := "URI", "user", "password", logrus.ErrorLevel, "server.com"
 	opts := client.Options{
 		Address:   ":9980",
 		UserAgent: "agent",
@@ -29,7 +29,8 @@ func TestParseConfig(t *testing.T) {
 		err5 := os.Setenv(envSkydAPIAddr, opts.Address)
 		err6 := os.Setenv(envSkydAPIUserAgent, opts.UserAgent)
 		err7 := os.Setenv(envSkydAPIPassword, opts.Password)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7); err != nil {
+		err8 := os.Setenv(envServerDomain, serverDomain)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +74,8 @@ func TestParseConfig(t *testing.T) {
 		err5 := os.Unsetenv(envSkydAPIAddr)
 		err6 := os.Unsetenv(envSkydAPIUserAgent)
 		err7 := os.Unsetenv(envSkydAPIPassword)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7); err != nil {
+		err8 := os.Unsetenv(envServerDomain)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
 			t.Fatal(err)
 		}
 	}()
@@ -160,7 +162,8 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envServerDomain); err != nil {
 		t.Fatal(err)
 	}
-	if err := assertConfig(uri, user, password, logrus.InfoLevel, opts); err != nil {
+	err = assertConfig(uri, user, password, logrus.InfoLevel, opts)
+	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
 }
