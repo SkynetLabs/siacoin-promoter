@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/utils"
 	"github.com/sirupsen/logrus"
@@ -38,7 +39,8 @@ func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siate
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	logEntry := logrus.NewEntry(logger)
 	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
 	if err != nil {

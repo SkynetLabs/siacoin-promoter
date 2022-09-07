@@ -61,7 +61,7 @@ func TestAddressWatcher(t *testing.T) {
 				deleted[update.Address] = struct{}{}
 			case "update":
 			default:
-				t.Fatal("unexpected operation type", update.OperationType)
+				t.Error("unexpected operation type", update.OperationType)
 			}
 		}
 		return nil
@@ -106,7 +106,7 @@ func TestAddressWatcher(t *testing.T) {
 		}
 		for _, unused := range inserted {
 			if !unused {
-				t.Fatal("inserted address should be unused")
+				t.Error("inserted address should be unused")
 			}
 		}
 		return nil
@@ -154,17 +154,6 @@ func TestAddressWatcher(t *testing.T) {
 		}
 	}
 
-	// Fetch 2 addresses for users. This should mark them as used.
-	_, err = p.AddressForUser(context.Background(), "user1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = p.AddressForUser(context.Background(), "user2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(time.Second)
-
 	// Prepare a new node that connects to the same db.
 	inserted2 := make(map[types.UnlockHash]bool)
 	deleted2 := make(map[types.UnlockHash]bool)
@@ -178,11 +167,12 @@ func TestAddressWatcher(t *testing.T) {
 			case operationTypeDelete:
 				deleted2[update.Address] = unused
 			default:
-				t.Fatal("unexpected operation type", update.OperationType)
+				t.Error("unexpected operation type", update.OperationType)
 			}
 		}
 		return nil
 	}
+
 	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
 	if err != nil {
 		t.Fatal(err)
@@ -215,8 +205,8 @@ func TestAddressWatcher(t *testing.T) {
 		// single one of them was used which should cause the callback
 		// getting called with unused=false.
 		for _, unused := range inserted2 {
-			if unused {
-				t.Fatal("inserted addresses should all be unused")
+			if !unused {
+				t.Error("inserted addresses should all be unused")
 			}
 		}
 		return nil
