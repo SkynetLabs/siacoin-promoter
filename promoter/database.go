@@ -183,7 +183,7 @@ func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.Unlock
 		return types.UnlockHash{}, err
 	}
 
-	// Kick off goroutine to check if regeneratin the pool is necessary in
+	// Kick off goroutine to check if regenerating the pool is necessary in
 	// both the successful case as well as the ErrNoDocuments case. The
 	// latter should never happen but we still try to handle it by
 	// generating new addresses.

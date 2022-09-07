@@ -33,9 +33,9 @@ type (
 		staticServerDomain string
 
 		// The lock client is used for locing the creation of new
-		// addresses withing the watched addresses collection. Only if
-		// an exclusive lock is acquired, new addresses are allowed to
-		// be inserted or the length of the collection be requested.
+		// addresses within the watched addresses collection. Only if an
+		// exclusive lock is acquired, new addresses are allowed to be
+		// inserted or the length of the collection be requested.
 		staticLockClient *lock.Client
 
 		staticSkyd *client.Client

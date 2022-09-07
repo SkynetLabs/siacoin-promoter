@@ -5,6 +5,7 @@ go 1.18
 require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/sirupsen/logrus v1.9.0
+	github.com/square/mongo-lock v0.0.0-20201208161834-4db518ed7fb2
 	gitlab.com/NebulousLabs/errors v0.0.0-20200929122200-06c536cf6975
 	gitlab.com/NebulousLabs/fastrand v0.0.0-20181126182046-603482d69e40
 	gitlab.com/SkynetLabs/skyd v1.6.8
@@ -30,7 +31,6 @@ require (
 	github.com/klauspost/reedsolomon v1.10.0 // indirect
 	github.com/opentracing/opentracing-go v1.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/square/mongo-lock v0.0.0-20201208161834-4db518ed7fb2 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tus/tusd v1.9.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
