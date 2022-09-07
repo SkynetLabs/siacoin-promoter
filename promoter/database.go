@@ -11,7 +11,6 @@ import (
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -32,8 +31,8 @@ const (
 // of addressed not assigned to any user.
 var filterUnusedAddresses = bson.M{
 	"$or": bson.A{
-		bson.M{"user": bson.M{"$exists": false}}, // field is not set
-		bson.M{"user": primitive.NilObjectID},    // field is set to default value
+		bson.M{"user_sub": bson.M{"$exists": false}}, // field is not set
+		bson.M{"user_sub": ""},                       // field is set to default value
 	},
 }
 
@@ -75,8 +74,7 @@ type (
 	// TODO: f/u with API endpoint for creating users and assigning
 	// addresses.
 	User struct {
-		ID  primitive.ObjectID `bson:"_id"`
-		Sub string             `bson:"sub"`
+		Sub string `bson:"_id"`
 
 		// TODO: f/u with a PR to poll for transactions. Store them in a
 		// transactions array together with the amount of incoming funds
@@ -90,13 +88,13 @@ type (
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
 
-		// UserID is the user that the address is assigned to. 0 if the
+		// UserSub is the user that the address is assigned to. 0 if the
 		// address is unused.
 		// TODO: f/u with PR to create addresses without users ahead of
 		// time.
 		// TODO: Also add a field that tells us which server generated
 		// the address.
-		UserID primitive.ObjectID `bson:"user_id"`
+		UserSub string `bson:"user_sub"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -128,7 +126,7 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 // Unused returns whether the watched address is currently not assigned to a
 // user.
 func (w *WatchedAddress) Unused() bool {
-	return w.UserID.IsZero()
+	return w.UserSub == ""
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -298,12 +296,68 @@ func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
 	return n < minUnusedAddresses, nil
 }
 
-// threadedGenerateAddresses checks whether new addresses need to be generated
+// AddressForUser returns an address for a user. If there is no such address,
+// fetch one from the pool. Then check if the pool needs to be topped up.
+// TODO: Once we add support for fetching users new addresses we need to make
+// sure we add an 'active' flag to indicate which of the associated addresses to
+// fetch.
+func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
+	// Fetch address of user.
+	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
+		"user_sub": sub,
+	})
+	var wa WatchedAddress
+	err := sr.Decode(&wa)
+	if err == nil {
+		return wa.Address, nil // return existing address
+	}
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to look for existing user address")
+		return types.UnlockHash{}, err
+	}
+
+	// If there was no address, fetch one from the pool.
+	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
+		"$set": bson.M{
+			"user_sub": sub,
+		},
+	})
+	err = sr.Decode(&wa)
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to acquire new address for user")
+		return types.UnlockHash{}, err
+	}
+
+	// Kick off goroutine to check if regeneratin the pool is necessary in
+	// both the successful case as well as the ErrNoDocuments case. The
+	// latter should never happen but we still try to handle it by
+	// generating new addresses.
+	p.wg.Add(1)
+	go func() {
+		p.threadedRegenerateAddresses()
+		p.wg.Done()
+	}()
+
+	return wa.Address, err
+}
+
+// threadedRegenerateAddresses checks whether new addresses need to be generated
 // and then generates enough addresses to restore the pool of unused addresses
 // to maxUnusedAddresses.
-func (p *Promoter) threadedGenerateAddresses() {
+func (p *Promoter) threadedRegenerateAddresses() {
+	// Do a fast check first. This is not accurate but might help us to
+	// avoid a write to the db in most cases.
+	shouldGenerate, err := p.staticShouldGenerateAddresses()
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to check whether regenerating the address pool is necessary")
+		return
+	}
+	if !shouldGenerate {
+		return // nothing to do
+	}
+
 	// Lock the collection.
-	err := p.staticLockClient.XLock(p.bgCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
+	err = p.staticLockClient.XLock(p.bgCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
 		Owner: "siacoin-promoter",
 		Host:  "TODO:servername",
 		TTL:   300, // 5 minutes

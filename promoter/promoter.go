@@ -9,6 +9,7 @@ import (
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 )
 
@@ -84,6 +85,17 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 		return nil, errors.Compose(err, p.Close())
 	}
 	p.staticLockClient = lockClient
+
+	// Kick off creation of addresses in non-testing builds. This is not
+	// really necessary but it will prevent the first user ever from getting
+	// an error when trying to fetch an address in production.
+	if build.Release != "testing" {
+		p.wg.Add(1)
+		go func() {
+			p.threadedRegenerateAddresses()
+			p.wg.Done()
+		}()
+	}
 	return p, nil
 }
 
