@@ -149,7 +149,7 @@ func main() {
 	}
 
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
+	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}

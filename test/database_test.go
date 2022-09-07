@@ -25,7 +25,7 @@ func TestHealth(t *testing.T) {
 	}()
 
 	// Create tester.
-	tester, err := newTester(&node.Client)
+	tester, err := newTester(&node.Client, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
