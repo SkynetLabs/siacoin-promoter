@@ -9,6 +9,9 @@ import (
 
 // TestWatchedSkydAddresses is a unit test for staticWatchedSkydAddresses.
 func TestWatchedSkydAddresses(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
 	p, node, err := newTestPromoter(t.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +65,9 @@ func TestWatchedSkydAddresses(t *testing.T) {
 
 // TestProcessAddressUpdate is a unit test for managedProcessAddressUpdate.
 func TestProcessAddressUpdate(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
 	p, node, err := newTestPromoter(t.Name())
 	if err != nil {
 		t.Fatal(err)
