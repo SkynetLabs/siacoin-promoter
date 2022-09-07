@@ -46,6 +46,7 @@ func TestAddressWatcher(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	inserted := make(map[types.UnlockHash]bool)
 	deleted := make(map[types.UnlockHash]struct{})
@@ -216,6 +217,7 @@ func TestWatchedDBAddresses(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
@@ -276,6 +278,7 @@ func TestShouldGenerateAddresses(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
@@ -335,6 +338,7 @@ func TestAddressForUser(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {

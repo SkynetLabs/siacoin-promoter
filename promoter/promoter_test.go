@@ -59,6 +59,7 @@ func TestPromoterHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
@@ -82,6 +83,7 @@ func TestAddrDiff(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
 		// Don't do anything.

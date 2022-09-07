@@ -12,6 +12,7 @@ func TestHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	// Spin up skyd instance.
 	node, err := utils.NewSkydForTesting(t.Name())

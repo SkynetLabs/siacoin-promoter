@@ -12,6 +12,8 @@ func TestWatchedSkydAddresses(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
+
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +70,8 @@ func TestProcessAddressUpdate(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
+
 	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
