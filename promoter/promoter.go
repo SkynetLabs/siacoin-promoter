@@ -28,8 +28,9 @@ type (
 	// ones. It can also track the incoming funds that users have sent to
 	// their assigned addresses.
 	Promoter struct {
-		staticDB     *mongo.Database
-		staticLogger *logrus.Entry
+		staticDB           *mongo.Database
+		staticLogger       *logrus.Entry
+		staticServerDomain string
 
 		// The lock client is used for locing the creation of new
 		// addresses withing the watched addresses collection. Only if
@@ -47,12 +48,12 @@ type (
 )
 
 // New creates a new promoter from the given db credentials.
-func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password string) (*Promoter, error) {
+func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password, domain string) (*Promoter, error) {
 	client, err := connect(ctx, log, uri, username, password)
 	if err != nil {
 		return nil, err
 	}
-	p, err := newPromoter(ctx, skyd, log, client)
+	p, err := newPromoter(ctx, skyd, log, client, domain)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +62,7 @@ func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, usern
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client) (*Promoter, error) {
+func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain string) (*Promoter, error) {
 	// Grab database from client.
 	database := client.Database(dbName)
 
@@ -70,12 +71,13 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 
 	// Create store.
 	p := &Promoter{
-		bgCtx:        bgCtx,
-		threadCancel: cancel,
-		ctx:          ctx,
-		staticDB:     database,
-		staticLogger: log,
-		staticSkyd:   skyd,
+		bgCtx:              bgCtx,
+		threadCancel:       cancel,
+		ctx:                ctx,
+		staticDB:           database,
+		staticLogger:       log,
+		staticServerDomain: domain,
+		staticSkyd:         skyd,
 	}
 
 	// Create lock client.

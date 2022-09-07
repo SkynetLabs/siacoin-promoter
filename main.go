@@ -21,12 +21,13 @@ type (
 	// config contains the configuration for the service which is parsed
 	// from the environment vars.
 	config struct {
-		LogLevel   logrus.Level
-		Port       int
-		DBURI      string
-		DBUser     string
-		DBPassword string
-		SkydOpts   client.Options
+		LogLevel     logrus.Level
+		Port         int
+		DBURI        string
+		DBUser       string
+		DBPassword   string
+		ServerDomain string
+		SkydOpts     client.Options
 	}
 )
 
@@ -64,6 +65,10 @@ const (
 	// API password.
 	// nolint:gosec // this is not a credential
 	envSkydAPIPassword = "SKYD_API_PASSWORD"
+
+	// envServerDomain is the environment variable for setting the domain of
+	// the server within the cluster.
+	envServerDomain = "SERVER_DOMAIN"
 )
 
 // parseConfig parses a Config struct from the environment.
@@ -98,6 +103,10 @@ func parseConfig() (*config, error) {
 	cfg.DBPassword, ok = os.LookupEnv(envMongoDBPassword)
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envMongoDBPassword)
+	}
+	cfg.ServerDomain, ok = os.LookupEnv(envServerDomain)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envServerDomain)
 	}
 	cfg.SkydOpts.Address, ok = os.LookupEnv(envSkydAPIAddr)
 	if !ok {

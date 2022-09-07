@@ -88,12 +88,13 @@ type (
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
 
+		// Server defines the server that created this address. This is
+		// useful for tracking which addresses belong to which server
+		// and as a result to which seed.
+		Server string `bson:"server"`
+
 		// UserSub is the user that the address is assigned to. 0 if the
 		// address is unused.
-		// TODO: f/u with PR to create addresses without users ahead of
-		// time.
-		// TODO: Also add a field that tells us which server generated
-		// the address.
 		UserSub string `bson:"user_sub"`
 	}
 
@@ -150,6 +151,72 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 	return client, nil
 }
 
+// AddressForUser returns an address for a user. If there is no such address,
+// fetch one from the pool. Then check if the pool needs to be topped up.
+// TODO: Once we add support for fetching users new addresses we need to make
+// sure we add an 'active' flag to indicate which of the associated addresses to
+// fetch.
+func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
+	// Fetch address of user.
+	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
+		"user_sub": sub,
+	})
+	var wa WatchedAddress
+	err := sr.Decode(&wa)
+	if err == nil {
+		return wa.Address, nil // return existing address
+	}
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to look for existing user address")
+		return types.UnlockHash{}, err
+	}
+
+	// If there was no address, fetch one from the pool.
+	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
+		"$set": bson.M{
+			"user_sub": sub,
+		},
+	})
+	err = sr.Decode(&wa)
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to acquire new address for user")
+		return types.UnlockHash{}, err
+	}
+
+	// Kick off goroutine to check if regeneratin the pool is necessary in
+	// both the successful case as well as the ErrNoDocuments case. The
+	// latter should never happen but we still try to handle it by
+	// generating new addresses.
+	p.wg.Add(1)
+	go func() {
+		p.threadedRegenerateAddresses()
+		p.wg.Done()
+	}()
+
+	return wa.Address, err
+}
+
+// Close closes the connection to the database.
+func (p *Promoter) Close() error {
+	// Cancel background threads.
+	p.threadCancel()
+
+	// Wait for them to finish.
+	p.wg.Wait()
+
+	// Disconnect from db.
+	return p.staticDB.Client().Disconnect(p.ctx)
+}
+
+// newUnusedWatchedAddress creates a new WatchedAddress for this promoter that
+// doesnt' have a User assigned yet.
+func (p *Promoter) newUnusedWatchedAddress(addr types.UnlockHash) WatchedAddress {
+	return WatchedAddress{
+		Address: addr,
+		Server:  p.staticServerDomain,
+	}
+}
+
 // staticColLocks returns the collection used to store locks.
 func (p *Promoter) staticColLocks() *mongo.Collection {
 	return p.staticDB.Collection(colLocksName)
@@ -159,6 +226,19 @@ func (p *Promoter) staticColLocks() *mongo.Collection {
 // addresses.
 func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 	return p.staticDB.Collection(colWatchedAddressesName)
+}
+
+// staticShouldGenerateAddresses returns whether or not we should try to
+// generate new addresses. This method doesn't use any locking to provide a
+// quick way to estimate whether we might need to generate new addresses. The
+// actual address generating code should lock the collection, fetch the actual
+// number of addresses and add new ones accordingly.
+func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
+	if err != nil {
+		return false, err
+	}
+	return n < minUnusedAddresses, nil
 }
 
 // staticWatchedDBAddresses returns all watched addresses as seen in the
@@ -283,64 +363,6 @@ OUTER:
 	}
 }
 
-// staticShouldGenerateAddresses returns whether or not we should try to
-// generate new addresses. This method doesn't use any locking to provide a
-// quick way to estimate whether we might need to generate new addresses. The
-// actual address generating code should lock the collection, fetch the actual
-// number of addresses and add new ones accordingly.
-func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
-	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
-	if err != nil {
-		return false, err
-	}
-	return n < minUnusedAddresses, nil
-}
-
-// AddressForUser returns an address for a user. If there is no such address,
-// fetch one from the pool. Then check if the pool needs to be topped up.
-// TODO: Once we add support for fetching users new addresses we need to make
-// sure we add an 'active' flag to indicate which of the associated addresses to
-// fetch.
-func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
-	// Fetch address of user.
-	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
-		"user_sub": sub,
-	})
-	var wa WatchedAddress
-	err := sr.Decode(&wa)
-	if err == nil {
-		return wa.Address, nil // return existing address
-	}
-	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
-		p.staticLogger.WithError(err).Error("Failed to look for existing user address")
-		return types.UnlockHash{}, err
-	}
-
-	// If there was no address, fetch one from the pool.
-	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
-		"$set": bson.M{
-			"user_sub": sub,
-		},
-	})
-	err = sr.Decode(&wa)
-	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
-		p.staticLogger.WithError(err).Error("Failed to acquire new address for user")
-		return types.UnlockHash{}, err
-	}
-
-	// Kick off goroutine to check if regeneratin the pool is necessary in
-	// both the successful case as well as the ErrNoDocuments case. The
-	// latter should never happen but we still try to handle it by
-	// generating new addresses.
-	p.wg.Add(1)
-	go func() {
-		p.threadedRegenerateAddresses()
-		p.wg.Done()
-	}()
-
-	return wa.Address, err
-}
-
 // threadedRegenerateAddresses checks whether new addresses need to be generated
 // and then generates enough addresses to restore the pool of unused addresses
 // to maxUnusedAddresses.
@@ -400,9 +422,7 @@ func (p *Promoter) threadedRegenerateAddresses() {
 			p.staticLogger.WithError(err).Error("Failed to fetch new address from skyd")
 			return
 		}
-		newAddresses = append(newAddresses, &WatchedAddress{
-			Address: wag.Address,
-		})
+		newAddresses = append(newAddresses, p.newUnusedWatchedAddress(wag.Address))
 	}
 
 	// Insert them into the db.
@@ -411,16 +431,4 @@ func (p *Promoter) threadedRegenerateAddresses() {
 		p.staticLogger.WithError(err).Error("Failed to store generated address in db.")
 		return
 	}
-}
-
-// Close closes the connection to the database.
-func (p *Promoter) Close() error {
-	// Cancel background threads.
-	p.threadCancel()
-
-	// Wait for them to finish.
-	p.wg.Wait()
-
-	// Disconnect from db.
-	return p.staticDB.Client().Disconnect(p.ctx)
 }

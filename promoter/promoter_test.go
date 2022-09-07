@@ -22,7 +22,7 @@ func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword)
+	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -44,7 +44,7 @@ func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siate
 	if err != nil {
 		return nil, nil, err
 	}
-	p, err := newPromoter(context.Background(), &skyd.Client, logEntry, client)
+	p, err := newPromoter(context.Background(), &skyd.Client, logEntry, client, name)
 	if err != nil {
 		return nil, nil, errors.Compose(err, client.Disconnect(ctx))
 	}

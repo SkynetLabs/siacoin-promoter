@@ -154,4 +154,13 @@ func TestParseConfig(t *testing.T) {
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
+
+	// Case 8: No server domain.
+	setEnv()
+	if err := os.Unsetenv(envServerDomain); err != nil {
+		t.Fatal(err)
+	}
+	if err := assertConfig(uri, user, password, logrus.InfoLevel, opts); err != nil {
+		t.Fatal(err)
+	}
 }

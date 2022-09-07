@@ -25,9 +25,7 @@ const (
 // Watch watches an address by adding it to the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
-		Address: addr,
-	})
+	_, err := p.staticColWatchedAddresses().InsertOne(ctx, p.newUnusedWatchedAddress(addr))
 	if mongo.IsDuplicateKeyError(err) {
 		// nothing to do, the ChangeStream should've picked up on that
 		// already.
@@ -39,9 +37,7 @@ func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
 // Unwatch unwatches an address by removing it from the database.
 // threadedAddressWatcher will then pick up on that change and apply it to skyd.
 func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
-		Address: addr,
-	})
+	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, p.newUnusedWatchedAddress(addr))
 	return err
 }
 
@@ -326,9 +322,7 @@ func TestShouldGenerateAddresses(t *testing.T) {
 		var addr types.UnlockHash
 		fastrand.Read(addr[:])
 		if i%2 == 0 {
-			_, err = p.staticColWatchedAddresses().InsertOne(context.Background(), WatchedAddress{
-				Address: addr,
-			})
+			_, err = p.staticColWatchedAddresses().InsertOne(context.Background(), p.newUnusedWatchedAddress(addr))
 		} else {
 			_, err = p.staticColWatchedAddresses().InsertOne(context.Background(), bson.M{
 				"_id": addr.String(),
@@ -412,9 +406,19 @@ func TestAddressForUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// There should be maxUnusedAddresses now.
 	err = build.Retry(100, 100*time.Millisecond, func() error {
+		// There should be maxUnusedAddresses now.
 		n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})
+		if err != nil {
+			return err
+		}
+		if n != maxUnusedAddresses {
+			return fmt.Errorf("wrong number of addresses %v != %v", n, maxUnusedAddresses)
+		}
+		// All of them should have the server set.
+		n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{
+			"server": p.staticServerDomain,
+		})
 		if err != nil {
 			return err
 		}
