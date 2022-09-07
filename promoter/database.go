@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	dbName                  = "siacoin-promoter"
 	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
 

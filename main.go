@@ -32,6 +32,9 @@ type (
 )
 
 const (
+	// dbName is the name of the database to use for the siacoin promoter.
+	dbName = "siacoin-promoter"
+
 	// defaultSkydUserAgent defines the default agent used when no other
 	// value is specified by the user.
 	defaultSkydUserAgent = "Sia-Agent"
@@ -149,7 +152,7 @@ func main() {
 	}
 
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain)
+	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}

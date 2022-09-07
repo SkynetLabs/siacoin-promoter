@@ -67,7 +67,7 @@ func TestAddressWatcher(t *testing.T) {
 		return nil
 	}
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), updateFn)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), updateFn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +79,6 @@ func TestAddressWatcher(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
-	// Reset database for the test.
-	if err := p.staticDB.Drop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	// Add some addresses.
 	var addrs []types.UnlockHash
@@ -173,7 +168,7 @@ func TestAddressWatcher(t *testing.T) {
 		return nil
 	}
 
-	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", f2)
+	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", t.Name(), f2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +217,7 @@ func TestWatchedDBAddresses(t *testing.T) {
 		t.SkipNow()
 	}
 
-	p, node, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,11 +229,6 @@ func TestWatchedDBAddresses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
-	// Reset database for the test.
-	if err := p.staticDB.Drop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	// Add some addresses.
 	var addr1 types.UnlockHash
@@ -287,7 +277,7 @@ func TestShouldGenerateAddresses(t *testing.T) {
 		t.SkipNow()
 	}
 
-	p, node, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,11 +289,6 @@ func TestShouldGenerateAddresses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
-	// Reset database for the test.
-	if err := p.staticDB.Drop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	// Case exactly minUnusedAddresses. We alternate between inserting
 	// addresses with no user field and addresses with a user field set to
@@ -351,7 +336,7 @@ func TestAddressForUser(t *testing.T) {
 		t.SkipNow()
 	}
 
-	p, node, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,11 +348,6 @@ func TestAddressForUser(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
-	// Reset database for the test.
-	if err := p.staticDB.Drop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	// Double check there are no addresses.
 	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})

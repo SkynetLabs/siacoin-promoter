@@ -48,12 +48,12 @@ type (
 )
 
 // New creates a new promoter from the given db credentials.
-func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password, domain string) (*Promoter, error) {
+func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
 	client, err := connect(ctx, log, uri, username, password)
 	if err != nil {
 		return nil, err
 	}
-	p, err := newPromoter(ctx, skyd, log, client, domain)
+	p, err := newPromoter(ctx, skyd, log, client, domain, db)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +62,9 @@ func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, usern
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain string) (*Promoter, error) {
+func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
 	// Grab database from client.
-	database := client.Database(dbName)
+	database := client.Database(db)
 
 	// Create a new context for background threads.
 	bgCtx, cancel := context.WithCancel(ctx)
