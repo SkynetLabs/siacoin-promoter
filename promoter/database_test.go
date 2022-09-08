@@ -354,7 +354,7 @@ func TestAddressForUser(t *testing.T) {
 	}()
 
 	// Double check there are no addresses.
-	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestAddressForUser(t *testing.T) {
 
 	err = build.Retry(100, 100*time.Millisecond, func() error {
 		// There should be maxUnusedAddresses now.
-		n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})
+		n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
 		if err != nil {
 			return err
 		}
@@ -390,7 +390,7 @@ func TestAddressForUser(t *testing.T) {
 			return fmt.Errorf("wrong number of addresses %v != %v", n, maxUnusedAddresses)
 		}
 		// All of them should have the server set.
-		n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{
+		n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{
 			"server": p.staticServerDomain,
 		})
 		if err != nil {
@@ -415,7 +415,7 @@ func TestAddressForUser(t *testing.T) {
 	}
 
 	// maxUnusedAddresses-1 should be unused.
-	n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses)
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +424,7 @@ func TestAddressForUser(t *testing.T) {
 	}
 
 	// maxUnusedAddresses should still exist.
-	n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestAddressForUser(t *testing.T) {
 	}
 
 	// maxUnusedAddresses-1 should be unused.
-	n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses)
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestAddressForUser(t *testing.T) {
 	}
 
 	// maxUnusedAddresses should still exist.
-	n, err = p.staticColWatchedAddresses().CountDocuments(p.bgCtx, bson.M{})
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
 	if err != nil {
 		t.Fatal(err)
 	}

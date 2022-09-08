@@ -22,6 +22,9 @@ const (
 	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
 
+	lockTTL             = 300 // seconds
+	lockPruningInterval = 24 * time.Hour
+
 	operationTypeInsert = operationType("insert")
 	operationTypeDelete = operationType("delete")
 )
@@ -30,14 +33,14 @@ const (
 // of addressed not assigned to any user.
 var filterUnusedAddresses = bson.M{
 	"$or": bson.A{
-		bson.M{"user_sub": bson.M{"$exists": false}}, // field is not set
-		bson.M{"user_sub": ""},                       // field is set to default value
+		bson.M{"user_id": bson.M{"$exists": false}}, // field is not set
+		bson.M{"user_id": ""},                       // field is set to default value
 	},
 }
 
 var (
-	// minUnusedAddresses is the min number of addresses we want to keep in the
-	// db which are not yet assinged to users. If the number drops below
+	// minUnusedAddresses is the min number of addresses we want to keep in
+	// the db which are not yet assigned to users. If the number drops below
 	// this, we generate more addresses.
 	minUnusedAddresses = build.Select(build.Var{
 		Testing:  int64(5),
@@ -46,7 +49,7 @@ var (
 	}).(int64)
 
 	// maxUnusedAddresses is the max number of addresses we want to keep in
-	// the db which are not yet assinged to users.
+	// the db which are not yet assigned to users.
 	maxUnusedAddresses = build.Select(build.Var{
 		Testing:  int64(10),
 		Dev:      int64(100),
@@ -94,7 +97,7 @@ type (
 
 		// UserSub is the user that the address is assigned to. 0 if the
 		// address is unused.
-		UserSub string `bson:"user_sub"`
+		UserSub string `bson:"user_id"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -158,7 +161,7 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
 	// Fetch address of user.
 	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
-		"user_sub": sub,
+		"user_id": sub,
 	})
 	var wa WatchedAddress
 	err := sr.Decode(&wa)
@@ -173,7 +176,7 @@ func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.Unlock
 	// If there was no address, fetch one from the pool.
 	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
 		"$set": bson.M{
-			"user_sub": sub,
+			"user_id": sub,
 		},
 	})
 	err = sr.Decode(&wa)
@@ -186,10 +189,10 @@ func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.Unlock
 	// both the successful case as well as the ErrNoDocuments case. The
 	// latter should never happen but we still try to handle it by
 	// generating new addresses.
-	p.wg.Add(1)
+	p.staticWG.Add(1)
 	go func() {
 		p.threadedRegenerateAddresses()
-		p.wg.Done()
+		p.staticWG.Done()
 	}()
 
 	return wa.Address, err
@@ -198,13 +201,13 @@ func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.Unlock
 // Close closes the connection to the database.
 func (p *Promoter) Close() error {
 	// Cancel background threads.
-	p.threadCancel()
+	p.staticThreadCancel()
 
 	// Wait for them to finish.
-	p.wg.Wait()
+	p.staticWG.Wait()
 
 	// Disconnect from db.
-	return p.staticDB.Client().Disconnect(p.ctx)
+	return p.staticDB.Client().Disconnect(p.staticCtx)
 }
 
 // newUnusedWatchedAddress creates a new WatchedAddress for this promoter that
@@ -233,7 +236,7 @@ func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 // actual address generating code should lock the collection, fetch the actual
 // number of addresses and add new ones accordingly.
 func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
-	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
 	if err != nil {
 		return false, err
 	}
@@ -362,6 +365,26 @@ OUTER:
 	}
 }
 
+// threadedPruneLocks periodically scans the db for prunable locks.
+func (p *Promoter) threadedPruneLocks() {
+	t := time.NewTicker(lockPruningInterval)
+	defer t.Stop()
+
+	purger := lock.NewPurger(p.staticLockClient)
+	for range t.C {
+		select {
+		case <-p.staticBGCtx.Done():
+			return
+		default:
+		}
+
+		_, err := purger.Purge(p.staticBGCtx)
+		if err != nil {
+			p.staticLogger.WithTime(time.Now()).WithError(err).Error("Purging locks failed")
+		}
+	}
+}
+
 // threadedRegenerateAddresses checks whether new addresses need to be generated
 // and then generates enough addresses to restore the pool of unused addresses
 // to maxUnusedAddresses.
@@ -378,11 +401,10 @@ func (p *Promoter) threadedRegenerateAddresses() {
 	}
 
 	// Lock the collection.
-	err = p.staticLockClient.XLock(p.bgCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
+	err = p.staticLockClient.XLock(p.staticBGCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
 		Owner: "siacoin-promoter",
-		Host:  "TODO:servername",
-		TTL:   300, // 5 minutes
-
+		Host:  p.staticServerDomain,
+		TTL:   lockTTL,
 	})
 	if err == lock.ErrAlreadyLocked {
 		p.staticLogger.Debug("Not generating new addresses because the collection is already locked")
@@ -391,13 +413,13 @@ func (p *Promoter) threadedRegenerateAddresses() {
 
 	// Unlock when we are done.
 	defer func() {
-		if _, err := p.staticLockClient.Unlock(p.bgCtx, "watched-addresses"); err != nil {
+		if _, err := p.staticLockClient.Unlock(p.staticBGCtx, "watched-addresses"); err != nil {
 			p.staticLogger.WithError(err).Error("Failed to unlock lock over watched addresses collection")
 		}
 	}()
 
 	// TODO: check number of unused addresses.
-	n, err := p.staticColWatchedAddresses().CountDocuments(p.bgCtx, filterUnusedAddresses)
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
 	if err != nil {
 		p.staticLogger.WithError(err).Error("Failed to fetch count of unused addresses for generating new ones")
 		return
@@ -425,7 +447,7 @@ func (p *Promoter) threadedRegenerateAddresses() {
 	}
 
 	// Insert them into the db.
-	_, err = p.staticColWatchedAddresses().InsertMany(p.bgCtx, newAddresses)
+	_, err = p.staticColWatchedAddresses().InsertMany(p.staticBGCtx, newAddresses)
 	if err != nil {
 		p.staticLogger.WithError(err).Error("Failed to store generated address in db.")
 		return

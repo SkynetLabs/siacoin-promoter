@@ -64,10 +64,10 @@ const (
 	// User Agent.
 	envSkydAPIUserAgent = "SKYD_API_USER_AGENT"
 
-	// envSkydAPIPassword is the environment variable for setting the skyd
+	// envSiaAPIPassword is the environment variable for setting the skyd
 	// API password.
 	// nolint:gosec // this is not a credential
-	envSkydAPIPassword = "SKYD_API_PASSWORD"
+	envSiaAPIPassword = "SIA_API_PASSWORD"
 
 	// envServerDomain is the environment variable for setting the domain of
 	// the server within the cluster.
@@ -119,9 +119,9 @@ func parseConfig() (*config, error) {
 	if ok {
 		cfg.SkydOpts.UserAgent = userAgent
 	}
-	cfg.SkydOpts.Password, ok = os.LookupEnv(envSkydAPIPassword)
+	cfg.SkydOpts.Password, ok = os.LookupEnv(envSiaAPIPassword)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIPassword)
+		return nil, fmt.Errorf("%s wasn't specified", envSiaAPIPassword)
 	}
 	return cfg, nil
 }

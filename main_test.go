@@ -28,7 +28,7 @@ func TestParseConfig(t *testing.T) {
 		err4 := os.Setenv(envLogLevel, logLevel.String())
 		err5 := os.Setenv(envSkydAPIAddr, opts.Address)
 		err6 := os.Setenv(envSkydAPIUserAgent, opts.UserAgent)
-		err7 := os.Setenv(envSkydAPIPassword, opts.Password)
+		err7 := os.Setenv(envSiaAPIPassword, opts.Password)
 		err8 := os.Setenv(envServerDomain, serverDomain)
 		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
 			t.Fatal(err)
@@ -73,7 +73,7 @@ func TestParseConfig(t *testing.T) {
 		err4 := os.Unsetenv(envLogLevel)
 		err5 := os.Unsetenv(envSkydAPIAddr)
 		err6 := os.Unsetenv(envSkydAPIUserAgent)
-		err7 := os.Unsetenv(envSkydAPIPassword)
+		err7 := os.Unsetenv(envSiaAPIPassword)
 		err8 := os.Unsetenv(envServerDomain)
 		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
 			t.Fatal(err)
@@ -149,7 +149,7 @@ func TestParseConfig(t *testing.T) {
 
 	// Case 7: No skyd password.
 	setEnv()
-	if err := os.Unsetenv(envSkydAPIPassword); err != nil {
+	if err := os.Unsetenv(envSiaAPIPassword); err != nil {
 		t.Fatal(err)
 	}
 	err = assertConfig(uri, user, password, logLevel, opts)

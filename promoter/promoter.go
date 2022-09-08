@@ -40,10 +40,10 @@ type (
 
 		staticSkyd *client.Client
 
-		ctx          context.Context
-		bgCtx        context.Context
-		threadCancel context.CancelFunc
-		wg           sync.WaitGroup
+		staticCtx          context.Context
+		staticBGCtx        context.Context
+		staticThreadCancel context.CancelFunc
+		staticWG           sync.WaitGroup
 	}
 )
 
@@ -71,9 +71,9 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 
 	// Create store.
 	p := &Promoter{
-		bgCtx:              bgCtx,
-		threadCancel:       cancel,
-		ctx:                ctx,
+		staticBGCtx:        bgCtx,
+		staticThreadCancel: cancel,
+		staticCtx:          ctx,
 		staticDB:           database,
 		staticLogger:       log,
 		staticServerDomain: domain,
@@ -92,10 +92,10 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 	// really necessary but it will prevent the first user ever from getting
 	// an error when trying to fetch an address in production.
 	if build.Release != "testing" {
-		p.wg.Add(1)
+		p.staticWG.Add(1)
 		go func() {
 			p.threadedRegenerateAddresses()
-			p.wg.Done()
+			p.staticWG.Done()
 		}()
 	}
 	return p, nil
@@ -105,7 +105,7 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 func (p *Promoter) Health() Health {
 	_, skydErr := p.staticSkyd.DaemonReadyGet()
 	return Health{
-		Database: p.staticDB.Client().Ping(p.ctx, nil),
+		Database: p.staticDB.Client().Ping(p.staticCtx, nil),
 		Skyd:     skydErr,
 	}
 }
@@ -114,10 +114,13 @@ func (p *Promoter) Health() Health {
 func (p *Promoter) initBackgroundThreads(f updateFunc) {
 	// Start watching the collection that contains the addresses we want
 	// skyd to watch.
-	p.wg.Add(1)
+	p.staticWG.Add(2)
 	go func() {
-		defer p.wg.Done()
-		p.threadedAddressWatcher(p.bgCtx, f)
+		defer p.staticWG.Done()
+		p.threadedAddressWatcher(p.staticBGCtx, f)
+
+		defer p.staticWG.Done()
+		p.threadedPruneLocks()
 	}()
 }
 
