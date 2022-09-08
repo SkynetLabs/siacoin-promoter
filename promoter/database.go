@@ -371,11 +371,11 @@ func (p *Promoter) threadedPruneLocks() {
 	defer t.Stop()
 
 	purger := lock.NewPurger(p.staticLockClient)
-	for range t.C {
+	for {
 		select {
 		case <-p.staticBGCtx.Done():
 			return
-		default:
+		case <-t.C:
 		}
 
 		_, err := purger.Purge(p.staticBGCtx)
