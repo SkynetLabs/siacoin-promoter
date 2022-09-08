@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
+	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -18,13 +19,46 @@ import (
 )
 
 const (
-	dbName                  = "siacoin-promoter"
+	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
+
+	lockTTL             = 300 // seconds
+	lockPruningInterval = 24 * time.Hour
 
 	operationTypeInsert = operationType("insert")
 	operationTypeDelete = operationType("delete")
+)
 
-	updateMaxBatchSize = 10000
+// filterUnusedAddresses is the filter used by queries interested in the number
+// of addressed not assigned to any user.
+var filterUnusedAddresses = bson.M{
+	"$or": bson.A{
+		bson.M{"user_id": bson.M{"$exists": false}}, // field is not set
+		bson.M{"user_id": ""},                       // field is set to default value
+	},
+}
+
+var (
+	// minUnusedAddresses is the min number of addresses we want to keep in
+	// the db which are not yet assigned to users. If the number drops below
+	// this, we generate more addresses.
+	minUnusedAddresses = build.Select(build.Var{
+		Testing:  int64(5),
+		Dev:      int64(50),
+		Standard: int64(5000),
+	}).(int64)
+
+	// maxUnusedAddresses is the max number of addresses we want to keep in
+	// the db which are not yet assigned to users.
+	maxUnusedAddresses = build.Select(build.Var{
+		Testing:  int64(10),
+		Dev:      int64(100),
+		Standard: int64(10000),
+	}).(int64)
+
+	// updateMaxBatchSize is the max number of addresses we send to skyd
+	// within a single API request.
+	updateMaxBatchSize = minUnusedAddresses
 )
 
 type (
@@ -42,8 +76,7 @@ type (
 	// TODO: f/u with API endpoint for creating users and assigning
 	// addresses.
 	User struct {
-		ID  primitive.ObjectID `bson:"_id"`
-		Sub string             `bson:"sub"`
+		Sub string `bson:"_id"`
 
 		// TODO: f/u with a PR to poll for transactions. Store them in a
 		// transactions array together with the amount of incoming funds
@@ -57,13 +90,14 @@ type (
 		// unique anyway.
 		Address types.UnlockHash `bson:"_id"`
 
-		// UserID is the user that the address is assigned to. 0 if the
+		// Server defines the server that created this address. This is
+		// useful for tracking which addresses belong to which server
+		// and as a result to which seed.
+		Server string `bson:"server"`
+
+		// UserSub is the user that the address is assigned to. 0 if the
 		// address is unused.
-		// TODO: f/u with PR to create addresses without users ahead of
-		// time.
-		// TODO: Also add a field that tells us which server generated
-		// the address.
-		UserID primitive.ObjectID `bson:"user_id"`
+		UserSub string `bson:"user_id"`
 	}
 
 	// WatchedAddressDBUpdate describes an update to the watched address
@@ -95,7 +129,7 @@ func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
 // Unused returns whether the watched address is currently not assigned to a
 // user.
 func (w *WatchedAddress) Unused() bool {
-	return w.UserID.IsZero()
+	return w.UserSub == ""
 }
 
 // connect creates a new database object that is connected to a mongodb.
@@ -119,33 +153,94 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 	return client, nil
 }
 
-// Watch watches an address by adding it to the database.
-// threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Watch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().InsertOne(ctx, WatchedAddress{
-		Address: addr,
+// AddressForUser returns an address for a user. If there is no such address,
+// fetch one from the pool. Then check if the pool needs to be topped up.
+// TODO: Once we add support for fetching users new addresses we need to make
+// sure we add an 'active' flag to indicate which of the associated addresses to
+// fetch.
+func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
+	// Fetch address of user.
+	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
+		"user_id": sub,
 	})
-	if mongo.IsDuplicateKeyError(err) {
-		// nothing to do, the ChangeStream should've picked up on that
-		// already.
-		return nil
+	var wa WatchedAddress
+	err := sr.Decode(&wa)
+	if err == nil {
+		return wa.Address, nil // return existing address
 	}
-	return err
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to look for existing user address")
+		return types.UnlockHash{}, err
+	}
+
+	// If there was no address, fetch one from the pool.
+	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
+		"$set": bson.M{
+			"user_id": sub,
+		},
+	})
+	err = sr.Decode(&wa)
+	if err != nil && !errors.Contains(err, mongo.ErrNoDocuments) {
+		p.staticLogger.WithError(err).Error("Failed to acquire new address for user")
+		return types.UnlockHash{}, err
+	}
+
+	// Kick off goroutine to check if regenerating the pool is necessary in
+	// both the successful case as well as the ErrNoDocuments case. The
+	// latter should never happen but we still try to handle it by
+	// generating new addresses.
+	p.staticWG.Add(1)
+	go func() {
+		p.threadedRegenerateAddresses()
+		p.staticWG.Done()
+	}()
+
+	return wa.Address, err
 }
 
-// Unwatch unwatches an address by removing it from the database.
-// threadedAddressWatcher will then pick up on that change and apply it to skyd.
-func (p *Promoter) Unwatch(ctx context.Context, addr types.UnlockHash) error {
-	_, err := p.staticColWatchedAddresses().DeleteOne(ctx, WatchedAddress{
+// Close closes the connection to the database.
+func (p *Promoter) Close() error {
+	// Cancel background threads.
+	p.staticThreadCancel()
+
+	// Wait for them to finish.
+	p.staticWG.Wait()
+
+	// Disconnect from db.
+	return p.staticDB.Client().Disconnect(p.staticCtx)
+}
+
+// newUnusedWatchedAddress creates a new WatchedAddress for this promoter that
+// doesnt' have a User assigned yet.
+func (p *Promoter) newUnusedWatchedAddress(addr types.UnlockHash) WatchedAddress {
+	return WatchedAddress{
 		Address: addr,
-	})
-	return err
+		Server:  p.staticServerDomain,
+	}
+}
+
+// staticColLocks returns the collection used to store locks.
+func (p *Promoter) staticColLocks() *mongo.Collection {
+	return p.staticDB.Collection(colLocksName)
 }
 
 // staticColWatchedAddresses returns the collection used to store watched
 // addresses.
 func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 	return p.staticDB.Collection(colWatchedAddressesName)
+}
+
+// staticShouldGenerateAddresses returns whether or not we should try to
+// generate new addresses. This method doesn't use any locking to provide a
+// quick way to estimate whether we might need to generate new addresses. The
+// actual address generating code should lock the collection, fetch the actual
+// number of addresses and add new ones accordingly.
+func (p *Promoter) staticShouldGenerateAddresses() (bool, error) {
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses, options.Count().SetLimit(minUnusedAddresses))
+	if err != nil {
+		return false, err
+	}
+	return n < minUnusedAddresses, nil
 }
 
 // staticWatchedDBAddresses returns all watched addresses as seen in the
@@ -256,7 +351,7 @@ OUTER:
 
 				// Check if there is more. If not, we continue
 				// the blocking loop.
-				if len(updates) == updateMaxBatchSize || !stream.TryNext(ctx) {
+				if int64(len(updates)) == updateMaxBatchSize || !stream.TryNext(ctx) {
 					break
 				}
 			}
@@ -270,14 +365,91 @@ OUTER:
 	}
 }
 
-// Close closes the connection to the database.
-func (p *Promoter) Close() error {
-	// Cancel background threads.
-	p.threadCancel()
+// threadedPruneLocks periodically scans the db for prunable locks.
+func (p *Promoter) threadedPruneLocks() {
+	t := time.NewTicker(lockPruningInterval)
+	defer t.Stop()
 
-	// Wait for them to finish.
-	p.wg.Wait()
+	purger := lock.NewPurger(p.staticLockClient)
+	for {
+		select {
+		case <-p.staticBGCtx.Done():
+			return
+		case <-t.C:
+		}
 
-	// Disconnect from db.
-	return p.staticDB.Client().Disconnect(p.ctx)
+		_, err := purger.Purge(p.staticBGCtx)
+		if err != nil {
+			p.staticLogger.WithTime(time.Now()).WithError(err).Error("Purging locks failed")
+		}
+	}
+}
+
+// threadedRegenerateAddresses checks whether new addresses need to be generated
+// and then generates enough addresses to restore the pool of unused addresses
+// to maxUnusedAddresses.
+func (p *Promoter) threadedRegenerateAddresses() {
+	// Do a fast check first. This is not accurate but might help us to
+	// avoid a write to the db in most cases.
+	shouldGenerate, err := p.staticShouldGenerateAddresses()
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to check whether regenerating the address pool is necessary")
+		return
+	}
+	if !shouldGenerate {
+		return // nothing to do
+	}
+
+	// Lock the collection.
+	err = p.staticLockClient.XLock(p.staticBGCtx, "watched-addresses", "watched-addresses", lock.LockDetails{
+		Owner: "siacoin-promoter",
+		Host:  p.staticServerDomain,
+		TTL:   lockTTL,
+	})
+	if err == lock.ErrAlreadyLocked {
+		p.staticLogger.Debug("Not generating new addresses because the collection is already locked")
+		return // nothing to do
+	}
+
+	// Unlock when we are done.
+	defer func() {
+		if _, err := p.staticLockClient.Unlock(p.staticBGCtx, "watched-addresses"); err != nil {
+			p.staticLogger.WithError(err).Error("Failed to unlock lock over watched addresses collection")
+		}
+	}()
+
+	// TODO: check number of unused addresses.
+	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to fetch count of unused addresses for generating new ones")
+		return
+	}
+
+	// Figure out how many to generate.
+	toGenerate := maxUnusedAddresses - n
+	if toGenerate <= 0 {
+		p.staticLogger.WithField("toGenerate", toGenerate).Debug("Not generating new addresses because the collection has enough")
+		return // nothing to do
+	}
+
+	p.staticLogger.WithField("toGenerate", toGenerate).Info("Starting to generate new addresses")
+
+	// Generate the new addresses. We have to do this one-by-one since skyd
+	// doesn't have an endpoint for address batch creation.
+	newAddresses := make([]interface{}, 0, toGenerate)
+	for i := int64(0); i < toGenerate; i++ {
+		wag, err := p.staticSkyd.WalletAddressGet()
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch new address from skyd")
+			return
+		}
+		newAddresses = append(newAddresses, p.newUnusedWatchedAddress(wag.Address))
+	}
+
+	// Insert them into the db.
+	_, err = p.staticColWatchedAddresses().InsertMany(p.staticBGCtx, newAddresses)
+	if err != nil {
+		p.staticLogger.WithError(err).Error("Failed to store generated address in db.")
+		return
+	}
 }

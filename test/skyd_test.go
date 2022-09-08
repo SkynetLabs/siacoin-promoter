@@ -20,7 +20,7 @@ func TestSkydConnection(t *testing.T) {
 	}
 
 	// Create a tester that can connect to the node.
-	tester, err := newTester(&node.Client)
+	tester, err := newTester(&node.Client, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

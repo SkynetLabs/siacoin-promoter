@@ -12,6 +12,7 @@ func TestHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
 	// Spin up skyd instance.
 	node, err := utils.NewSkydForTesting(t.Name())
@@ -25,7 +26,7 @@ func TestHealth(t *testing.T) {
 	}()
 
 	// Create tester.
-	tester, err := newTester(&node.Client)
+	tester, err := newTester(&node.Client, t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

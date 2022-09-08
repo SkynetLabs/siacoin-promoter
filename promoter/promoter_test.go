@@ -4,16 +4,18 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/utils"
 	"github.com/sirupsen/logrus"
+	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/NebulousLabs/fastrand"
 	"gitlab.com/SkynetLabs/skyd/siatest"
 	"go.sia.tech/siad/types"
 )
 
 // newTestPromoter creates a Promoter instance for testing.
-func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
+func newTestPromoter(name, dbName string) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -21,7 +23,7 @@ func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword)
+	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name, dbName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -29,7 +31,7 @@ func newTestPromoter(name string) (*Promoter, *siatest.TestNode, error) {
 }
 
 // newTestPromoterWithUpdateFunc creates a Promoter instance for testing.
-func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
+func newTestPromoterWithUpdateFunc(name, dbName string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -37,13 +39,17 @@ func newTestPromoterWithUpdateFunc(name string, f updateFunc) (*Promoter, *siate
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	logEntry := logrus.NewEntry(logger)
 	client, err := connect(ctx, logEntry, testURI, testUsername, testPassword)
 	if err != nil {
 		return nil, nil, err
 	}
-	p := newPromoter(context.Background(), &skyd.Client, logEntry, client)
+	p, err := newPromoter(context.Background(), &skyd.Client, logEntry, client, name, dbName)
+	if err != nil {
+		return nil, nil, errors.Compose(err, client.Disconnect(ctx))
+	}
 	p.initBackgroundThreads(f)
 	return p, skyd, nil
 }
@@ -53,11 +59,20 @@ func TestPromoterHealth(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
-	p, _, err := newTestPromoter(t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 	if ph := p.Health(); ph.Database != nil || ph.Skyd != nil {
 		t.Fatal("not healthy", ph)
 	}
@@ -68,8 +83,9 @@ func TestAddrDiff(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	t.Parallel()
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
 		// Don't do anything.
 		return nil
 	})
@@ -84,11 +100,6 @@ func TestAddrDiff(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-
-	// Reset database for the test.
-	if err := p.staticDB.Drop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 
 	// Create some addresses.
 	var addr1 types.UnlockHash

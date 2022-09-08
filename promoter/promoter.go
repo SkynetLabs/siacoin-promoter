@@ -5,8 +5,11 @@ import (
 	"sync"
 
 	"github.com/sirupsen/logrus"
+	lock "github.com/square/mongo-lock"
+	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 )
 
@@ -25,53 +28,84 @@ type (
 	// ones. It can also track the incoming funds that users have sent to
 	// their assigned addresses.
 	Promoter struct {
-		staticDB     *mongo.Database
-		staticLogger *logrus.Entry
+		staticDB           *mongo.Database
+		staticLogger       *logrus.Entry
+		staticServerDomain string
+
+		// The lock client is used for locing the creation of new
+		// addresses within the watched addresses collection. Only if an
+		// exclusive lock is acquired, new addresses are allowed to be
+		// inserted or the length of the collection be requested.
+		staticLockClient *lock.Client
 
 		staticSkyd *client.Client
 
-		ctx          context.Context
-		bgCtx        context.Context
-		threadCancel context.CancelFunc
-		wg           sync.WaitGroup
+		staticCtx          context.Context
+		staticBGCtx        context.Context
+		staticThreadCancel context.CancelFunc
+		staticWG           sync.WaitGroup
 	}
 )
 
 // New creates a new promoter from the given db credentials.
-func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password string) (*Promoter, error) {
+func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
 	client, err := connect(ctx, log, uri, username, password)
 	if err != nil {
 		return nil, err
 	}
-	p := newPromoter(ctx, skyd, log, client)
+	p, err := newPromoter(ctx, skyd, log, client, domain, db)
+	if err != nil {
+		return nil, err
+	}
 	p.initBackgroundThreads(p.managedProcessAddressUpdate)
 	return p, nil
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client) *Promoter {
+func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
 	// Grab database from client.
-	database := client.Database(dbName)
+	database := client.Database(db)
 
 	// Create a new context for background threads.
 	bgCtx, cancel := context.WithCancel(ctx)
 
 	// Create store.
-	return &Promoter{
-		bgCtx:        bgCtx,
-		threadCancel: cancel,
-		ctx:          ctx,
-		staticDB:     database,
-		staticLogger: log,
-		staticSkyd:   skyd,
+	p := &Promoter{
+		staticBGCtx:        bgCtx,
+		staticThreadCancel: cancel,
+		staticCtx:          ctx,
+		staticDB:           database,
+		staticLogger:       log,
+		staticServerDomain: domain,
+		staticSkyd:         skyd,
 	}
+
+	// Create lock client.
+	lockClient := lock.NewClient(p.staticColLocks())
+	err := lockClient.CreateIndexes(ctx)
+	if err != nil {
+		return nil, errors.Compose(err, p.Close())
+	}
+	p.staticLockClient = lockClient
+
+	// Kick off creation of addresses in non-testing builds. This is not
+	// really necessary but it will prevent the first user ever from getting
+	// an error when trying to fetch an address in production.
+	if build.Release != "testing" {
+		p.staticWG.Add(1)
+		go func() {
+			p.threadedRegenerateAddresses()
+			p.staticWG.Done()
+		}()
+	}
+	return p, nil
 }
 
 // Health returns some health information about the promoter.
 func (p *Promoter) Health() Health {
 	_, skydErr := p.staticSkyd.DaemonReadyGet()
 	return Health{
-		Database: p.staticDB.Client().Ping(p.ctx, nil),
+		Database: p.staticDB.Client().Ping(p.staticCtx, nil),
 		Skyd:     skydErr,
 	}
 }
@@ -80,10 +114,13 @@ func (p *Promoter) Health() Health {
 func (p *Promoter) initBackgroundThreads(f updateFunc) {
 	// Start watching the collection that contains the addresses we want
 	// skyd to watch.
-	p.wg.Add(1)
+	p.staticWG.Add(2)
 	go func() {
-		defer p.wg.Done()
-		p.threadedAddressWatcher(p.bgCtx, f)
+		defer p.staticWG.Done()
+		p.threadedAddressWatcher(p.staticBGCtx, f)
+
+		defer p.staticWG.Done()
+		p.threadedPruneLocks()
 	}()
 }
 

@@ -21,16 +21,20 @@ type (
 	// config contains the configuration for the service which is parsed
 	// from the environment vars.
 	config struct {
-		LogLevel   logrus.Level
-		Port       int
-		DBURI      string
-		DBUser     string
-		DBPassword string
-		SkydOpts   client.Options
+		LogLevel     logrus.Level
+		Port         int
+		DBURI        string
+		DBUser       string
+		DBPassword   string
+		ServerDomain string
+		SkydOpts     client.Options
 	}
 )
 
 const (
+	// dbName is the name of the database to use for the siacoin promoter.
+	dbName = "siacoin-promoter"
+
 	// defaultSkydUserAgent defines the default agent used when no other
 	// value is specified by the user.
 	defaultSkydUserAgent = "Sia-Agent"
@@ -60,10 +64,14 @@ const (
 	// User Agent.
 	envSkydAPIUserAgent = "SKYD_API_USER_AGENT"
 
-	// envSkydAPIPassword is the environment variable for setting the skyd
+	// envSiaAPIPassword is the environment variable for setting the skyd
 	// API password.
 	// nolint:gosec // this is not a credential
-	envSkydAPIPassword = "SKYD_API_PASSWORD"
+	envSiaAPIPassword = "SIA_API_PASSWORD"
+
+	// envServerDomain is the environment variable for setting the domain of
+	// the server within the cluster.
+	envServerDomain = "SERVER_DOMAIN"
 )
 
 // parseConfig parses a Config struct from the environment.
@@ -99,6 +107,10 @@ func parseConfig() (*config, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envMongoDBPassword)
 	}
+	cfg.ServerDomain, ok = os.LookupEnv(envServerDomain)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envServerDomain)
+	}
 	cfg.SkydOpts.Address, ok = os.LookupEnv(envSkydAPIAddr)
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIAddr)
@@ -107,9 +119,9 @@ func parseConfig() (*config, error) {
 	if ok {
 		cfg.SkydOpts.UserAgent = userAgent
 	}
-	cfg.SkydOpts.Password, ok = os.LookupEnv(envSkydAPIPassword)
+	cfg.SkydOpts.Password, ok = os.LookupEnv(envSiaAPIPassword)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", envSkydAPIPassword)
+		return nil, fmt.Errorf("%s wasn't specified", envSiaAPIPassword)
 	}
 	return cfg, nil
 }
@@ -140,7 +152,7 @@ func main() {
 	}
 
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword)
+	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
