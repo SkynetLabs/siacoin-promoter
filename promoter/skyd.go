@@ -1,7 +1,11 @@
 package promoter
 
 import (
+	"fmt"
+
 	"gitlab.com/NebulousLabs/errors"
+	"gitlab.com/SkynetLabs/skyd/node/api/client"
+	"go.sia.tech/siad/node/api"
 	"go.sia.tech/siad/types"
 )
 
@@ -53,4 +57,44 @@ func (p *Promoter) staticWatchedSkydAddresses() ([]types.UnlockHash, error) {
 		return nil, err
 	}
 	return wag.Addresses, nil
+}
+
+// staticTxnsByAddress fetches all confirmed transactions for a given address
+// from skyd and returns them as an interface slice ready to be inserted into
+// the database.
+func (p *Promoter) staticTxnsByAddress(addr types.UnlockHash) ([]interface{}, error) {
+	// Need to use the unsafe client since there is no safe method for that
+	// endpoint.
+	c := client.NewUnsafeClient(*p.staticSkyd)
+
+	// Get txns related to the provided address.
+	var wtag api.WalletTransactionsGETaddr
+	err := c.Get(fmt.Sprintf("/wallet/transactions/%s", addr), &wtag)
+	if err != nil {
+		return nil, err
+	}
+
+	// Go through all the related confirmed transactions and find the ones
+	// for which the address is an output a.k.a. the receiver of the funds.
+	// Then sum up the received funds through that transaction and append it
+	// to the slice we return.
+	var txns []interface{}
+	for _, txn := range wtag.ConfirmedTransactions {
+		save := false
+		var value types.Currency
+		for _, out := range txn.Outputs {
+			if out.RelatedAddress == addr {
+				value = value.Add(out.Value)
+				save = true
+			}
+		}
+		if save {
+			txns = append(txns, Transaction{
+				Address: addr,
+				TxnID:   txn.TransactionID,
+				Value:   value.String(),
+			})
+		}
+	}
+	return txns, nil
 }
