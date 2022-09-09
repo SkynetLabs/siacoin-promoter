@@ -170,7 +170,8 @@ func TestPollTransactions(t *testing.T) {
 		}
 	}()
 
-	// Fill the database with addresses by running addres regeneration once manually.
+	// Fill the database with addresses by running address regeneration once
+	// manually.
 	p.threadedRegenerateAddresses()
 
 	// Get an address for a user.
