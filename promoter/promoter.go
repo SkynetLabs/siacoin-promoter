@@ -50,8 +50,8 @@ type (
 )
 
 var (
-	// txnPolInterval is the interval for polling for transactions from skyd.
-	txnPolInterval = build.Select(build.Var{
+	// txnPollInterval is the interval for polling for transactions from skyd.
+	txnPollInterval = build.Select(build.Var{
 		Dev:      time.Minute,
 		Standard: 10 * time.Minute,
 		Testing:  5 * time.Second,
@@ -198,7 +198,7 @@ func (p *Promoter) threadedCreditTransactions() {
 // threadedPollTransactions continuously polls skyd for transactions related to
 // watched addresses and writes them to the DB.
 func (p *Promoter) threadedPollTransactions() {
-	t := time.NewTicker(txnPolInterval)
+	t := time.NewTicker(txnPollInterval)
 	defer t.Stop()
 	for {
 		select {
@@ -206,13 +206,13 @@ func (p *Promoter) threadedPollTransactions() {
 			return
 		case <-t.C:
 		}
-		p.staticLogger.WithTime(time.Now()).Info("Starting to poll transactions from skyd")
+		p.staticLogger.WithTime(time.Now().UTC()).Info("Starting to poll transactions from skyd")
 
 		// Get used addresses.
 		c, err := p.staticColWatchedAddresses().Find(p.staticBGCtx, bson.M{
-			"$or": bson.A{
-				bson.M{"user_id": bson.M{"$exists": true}},
-				bson.M{"user_id": bson.M{"$ne": ""}},
+			"user_id": bson.M{
+				"$exists": true,
+				"$ne":     "",
 			},
 		})
 		if err != nil {
@@ -223,14 +223,14 @@ func (p *Promoter) threadedPollTransactions() {
 		// For each one get the related txns from skyd and save them to
 		// the db.
 		var nAddresssInserted, nTxnsInserted int
-		for c.Next(p.staticBGCtx) {
-			// Get address.
-			var wa WatchedAddress
-			if err := c.Decode(&wa); err != nil {
-				p.staticLogger.WithError(err).Error("Failed to decode address")
-				continue // try next address
-			}
+		// Get addresses.
+		var was []WatchedAddress
+		if err := c.All(p.staticBGCtx, &was); err != nil {
+			p.staticLogger.WithError(err).Error("Failed to decode address")
+			continue // try next address
+		}
 
+		for _, wa := range was {
 			// Fetch related txns from skyd.
 			txns, err := p.staticTxnsByAddress(wa.Address)
 			if err != nil {
@@ -247,6 +247,6 @@ func (p *Promoter) threadedPollTransactions() {
 			}
 			nAddresssInserted++
 		}
-		p.staticLogger.WithTime(time.Now()).Infof("Inserted %v transactions for %v addresses", nTxnsInserted, nAddresssInserted)
+		p.staticLogger.WithTime(time.Now().UTC()).Infof("Inserted %v transactions for %v addresses", nTxnsInserted, nAddresssInserted)
 	}
 }

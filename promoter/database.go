@@ -92,7 +92,10 @@ type (
 		Address  types.UnlockHash    `bson:"address_id"`
 		Credited bool                `bson:"credited"`
 		TxnID    types.TransactionID `bson:"_id"`
-		Value    string              `bson:"value"`
+
+		// Value is a stringified types.Currency since types.Currency is too large for
+		// other types and Mongo can't seem to deal with it.
+		Value string `bson:"value"`
 	}
 
 	// WatchedAddress describes an entry in the watched address collection.
@@ -398,7 +401,7 @@ func (p *Promoter) threadedPruneLocks() {
 
 		_, err := purger.Purge(p.staticBGCtx)
 		if err != nil {
-			p.staticLogger.WithTime(time.Now()).WithError(err).Error("Purging locks failed")
+			p.staticLogger.WithTime(time.Now().UTC()).WithError(err).Error("Purging locks failed")
 		}
 	}
 }
