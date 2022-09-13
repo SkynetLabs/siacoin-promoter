@@ -11,6 +11,7 @@ import (
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 )
@@ -140,6 +141,11 @@ func (p *Promoter) initBackgroundThreads(f updateFunc) {
 		defer p.staticWG.Done()
 		p.threadedPollTransactions()
 	}()
+	p.staticWG.Add(1)
+	go func() {
+		defer p.staticWG.Done()
+		p.threadedCreditTransactions()
+	}()
 }
 
 // staticAddrDiff returns a diff of addresses that describes which addresses
@@ -186,13 +192,61 @@ func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd []WatchedAddress, 
 // threadedCreditTransactions continuously polls the db for uncreditted txns and
 // notifies the credit promoter about them.
 func (p *Promoter) threadedCreditTransactions() {
-	// TODO: Fetch all txns with credited == false.
+	t := time.NewTicker(txnPollInterval)
+	defer t.Stop()
+LOOP:
+	for {
+		select {
+		case <-p.staticBGCtx.Done():
+			return
+		case <-t.C:
+		}
 
-	// TODO: Credit the promoter. NOTE: This needs to be idempotent so we
-	// include a txn ID in the request. Requesting a credit with the same
-	// txn ID should still only credit it once.
+		// Loop over txns one-by-one.
+		for {
+			// Fetch an transaction that the credit system doesn't know
+			// about yet.
+			currentTime := time.Now().UTC()
+			sr := p.staticColTransactions().FindOneAndUpdate(p.staticBGCtx, bson.M{
+				"credited_at": bson.M{
+					"$lt": currentTime.Add(-txnPollInterval),
+				},
+			}, bson.M{
+				"$set": bson.M{
+					"credited_at": currentTime,
+				},
+			}, options.FindOneAndUpdate())
+			if errors.Contains(sr.Err(), mongo.ErrNoDocuments) {
+				continue LOOP // no more txns in this iteration
+			}
+			if sr.Err() != nil {
+				p.staticLogger.WithError(sr.Err()).Error("Failed to fetch another uncredited txn")
+				continue LOOP // db failure, try again later
+			}
 
-	// TODO: Update the credited txns in the database as credited = true.
+			// Decode txn.
+			var txn Transaction
+			if err := sr.Decode(&txn); err != nil {
+				p.staticLogger.WithError(err).Error("Failed to decode txn")
+				continue // try next txn
+			}
+
+			// TODO: Send txn to credit system.
+
+			// Upon success mark it as credited.
+			_, err := p.staticColTransactions().UpdateOne(p.staticBGCtx, bson.M{
+				"_id": txn.TxnID,
+			}, bson.M{
+				"$set": bson.M{
+					"credited": true,
+				},
+			})
+			if err != nil {
+				p.staticLogger.WithError(err).Error("Failed to credit txn")
+				continue // try next txn
+			}
+		}
+	}
 }
 
 // threadedPollTransactions continuously polls skyd for transactions related to
