@@ -222,6 +222,7 @@ func TestPollTransactions(t *testing.T) {
 	}
 }
 
+// TestCreditTransactions is a unit test for threadedTestCreditTransactions.
 func TestCreditTransactions(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()

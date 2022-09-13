@@ -2,6 +2,7 @@ package promoter
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -231,7 +232,36 @@ LOOP:
 				continue // try next txn
 			}
 
-			// TODO: Send txn to credit system.
+			// Fetch the user for the txn.
+			sr = p.staticColWatchedAddresses().FindOne(p.staticBGCtx, bson.M{
+				"_id": txn.Address,
+			})
+			if errors.Contains(sr.Err(), mongo.ErrNoDocuments) {
+				p.staticLogger.WithError(sr.Err()).Error("Address for txn doesn't exist")
+				continue // try next
+			}
+			if sr.Err() != nil {
+				p.staticLogger.WithError(sr.Err()).Error("Failed to fetch address for txn")
+				continue LOOP // db failure, try again later
+			}
+			var wa WatchedAddress
+			if err := sr.Decode(&wa); err != nil {
+				p.staticLogger.WithError(sr.Err()).Error("Failed to decode address for txn")
+				continue // try next
+			}
+
+			// Parse the amount to credit.
+			var amt types.Currency
+			if _, err := fmt.Sscan(txn.Value, &amt); err != nil {
+				p.staticLogger.WithError(sr.Err()).Error("Failed to parse txn amount")
+				continue // try next
+			}
+
+			// Send txn to credit system.
+			if err := p.staticCreditTxn(wa.UserSub, txn.TxnID, amt); err != nil {
+				p.staticLogger.WithError(sr.Err()).Error("Failed to submit txn to credit system")
+				continue LOOP // something is wrong with the credit system - skip iteration
+			}
 
 			// Upon success mark it as credited.
 			_, err := p.staticColTransactions().UpdateOne(p.staticBGCtx, bson.M{
