@@ -3,6 +3,7 @@ package promoter
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -460,5 +461,102 @@ func TestAddressForUser(t *testing.T) {
 	}
 	if n != maxUnusedAddresses {
 		t.Fatalf("wrong number of addresses %v != %v", n, maxUnusedAddresses)
+	}
+}
+
+// TestInsertTransactions is a unit test for staticInsertTransactions.
+func TestInsertTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Parallel()
+
+	p, node, err := newTestPromoter(t.Name(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Get an address and send money to it multiple times to get multiple
+	// addresses.
+	wag, err := node.WalletAddressGet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := wag.Address
+	nTxns := 10
+	for i := 0; i < nTxns; i++ {
+		_, err = node.WalletSiacoinsPost(types.SiacoinPrecision, addr, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := node.MineBlock(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the txns from skyd.
+	txns, err := p.staticTxnsByAddress(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(txns) != nTxns {
+		t.Fatalf("should have %v txn but was %v", nTxns, len(txns))
+	}
+
+	// Insert half of them.
+	n, err := p.staticInsertTransactions(txns[:len(txns)/2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(txns)/2 {
+		t.Fatalf("wrong number of txns inserted %v != %v", n, len(txns)/2)
+	}
+
+	// Insert all of them.
+	n, err = p.staticInsertTransactions(txns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(txns)/2 {
+		t.Fatalf("wrong number of txns inserted %v != %v", n, len(txns)/2)
+	}
+
+	// The database should contain the txns.
+	c, err := p.staticColTransactions().Find(context.Background(), bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dbTxns []Transaction
+	if err := c.All(context.Background(), &dbTxns); err != nil {
+		t.Fatal(err)
+	}
+	if len(dbTxns) != len(txns) {
+		t.Fatalf("wrong length %v != %v", len(dbTxns), len(txns))
+	}
+
+	// Txns should be the same.
+	txnMap := make(map[types.TransactionID]Transaction)
+	for _, txn := range txns {
+		t := txn.(Transaction)
+		txnMap[t.TxnID] = t
+	}
+	for _, txn := range dbTxns {
+		foundTxn, found := txnMap[txn.TxnID]
+		if !found {
+			t.Fatal("not found")
+		}
+		if !reflect.DeepEqual(foundTxn, txn) {
+			t.Log(foundTxn)
+			t.Log(txn)
+			t.Fatal("txn mismatch")
+		}
 	}
 }

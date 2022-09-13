@@ -21,6 +21,7 @@ import (
 const (
 	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
+	colTransactionsName     = "transactions"
 
 	lockTTL             = 300 // seconds
 	lockPruningInterval = 24 * time.Hour
@@ -81,6 +82,20 @@ type (
 		// TODO: f/u with a PR to poll for transactions. Store them in a
 		// transactions array together with the amount of incoming funds
 		// after the promoter service was notified of the new txn.
+	}
+
+	// Transaction describes a single transaction within the transaction
+	// collection. They serve as receipts for incoming payments for users
+	// and as a reference for which transactions we credited the user for
+	// already by contacting the credit promoter.
+	Transaction struct {
+		Address  types.UnlockHash    `bson:"address_id"`
+		Credited bool                `bson:"credited"`
+		TxnID    types.TransactionID `bson:"_id"`
+
+		// Value is a stringified types.Currency since types.Currency is too large for
+		// other types and Mongo can't seem to deal with it.
+		Value string `bson:"value"`
 	}
 
 	// WatchedAddress describes an entry in the watched address collection.
@@ -222,6 +237,12 @@ func (p *Promoter) newUnusedWatchedAddress(addr types.UnlockHash) WatchedAddress
 // staticColLocks returns the collection used to store locks.
 func (p *Promoter) staticColLocks() *mongo.Collection {
 	return p.staticDB.Collection(colLocksName)
+}
+
+// staticColTransactions returns the collection used to store transactions from
+// skyd.
+func (p *Promoter) staticColTransactions() *mongo.Collection {
+	return p.staticDB.Collection(colTransactionsName)
 }
 
 // staticColWatchedAddresses returns the collection used to store watched
@@ -380,7 +401,7 @@ func (p *Promoter) threadedPruneLocks() {
 
 		_, err := purger.Purge(p.staticBGCtx)
 		if err != nil {
-			p.staticLogger.WithTime(time.Now()).WithError(err).Error("Purging locks failed")
+			p.staticLogger.WithTime(time.Now().UTC()).WithError(err).Error("Purging locks failed")
 		}
 	}
 }
@@ -452,4 +473,31 @@ func (p *Promoter) threadedRegenerateAddresses() {
 		p.staticLogger.WithError(err).Error("Failed to store generated address in db.")
 		return
 	}
+}
+
+// staticInsertTransactions inserts transactions into the transaction collection
+// while ignoring any errors returned as a result of the txn being in the
+// collection already.
+func (p *Promoter) staticInsertTransactions(txns []interface{}) (n int, _ error) {
+	imr, err := p.staticColTransactions().InsertMany(p.staticBGCtx, txns, options.InsertMany().SetOrdered(false))
+	if imr != nil {
+		n = len(imr.InsertedIDs)
+	}
+	if err == nil {
+		return n, nil
+	}
+
+	// Check if error is a BulkWriteException. If not just return the error.
+	bulkErr, isBulkErr := err.(mongo.BulkWriteException)
+	if !isBulkErr {
+		return n, err
+	}
+	// Otherwise we inspect the errors individually.
+	var errs error
+	for _, err := range bulkErr.WriteErrors {
+		if !mongo.IsDuplicateKeyError(err) {
+			errs = errors.Compose(errs, err)
+		}
+	}
+	return n, errs
 }

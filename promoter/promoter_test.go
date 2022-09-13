@@ -2,7 +2,9 @@ package promoter
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,11 +12,14 @@ import (
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/NebulousLabs/fastrand"
+	"gitlab.com/SkynetLabs/skyd/build"
 	"gitlab.com/SkynetLabs/skyd/siatest"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.sia.tech/siad/types"
 )
 
-// newTestPromoter creates a Promoter instance for testing.
+// newTestPromoter creates a Promoter instance for testing
+// without the background threads being launched.
 func newTestPromoter(name, dbName string) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
@@ -142,5 +147,77 @@ func TestAddrDiff(t *testing.T) {
 	}
 	if toRemove[0] != addr3 {
 		t.Fatal("addr3 should be the one to remove")
+	}
+}
+
+// TestPollTransactions is a unit test for threadedPollTransactions.
+func TestPollTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Parallel()
+
+	p, node, err := newTestPromoter(t.Name(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Fill the database with addresses by running address regeneration once
+	// manually.
+	p.threadedRegenerateAddresses()
+
+	// Get an address for a user.
+	user := "user"
+	addr, err := p.AddressForUser(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send money to that address.
+	wsp, err := node.WalletSiacoinsPost(types.SiacoinPrecision, addr, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mine it.
+	if err := node.MineBlock(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The following txn should be inserted after a while.
+	expectedTxn := Transaction{
+		Address:  addr,
+		Credited: false,
+		TxnID:    wsp.TransactionIDs[len(wsp.TransactionIDs)-1],
+		Value:    types.SiacoinPrecision.String(),
+	}
+
+	err = build.Retry(200, 100*time.Millisecond, func() error {
+		c, err := p.staticColTransactions().Find(context.Background(), bson.M{})
+		if err != nil {
+			return err
+		}
+		var dbTxns []Transaction
+		if err := c.All(context.Background(), &dbTxns); err != nil {
+			t.Fatal(err)
+		}
+		if len(dbTxns) != 1 {
+			return fmt.Errorf("expected 1 txn but got %v", len(dbTxns))
+		}
+		if !reflect.DeepEqual(dbTxns[0], expectedTxn) {
+			return fmt.Errorf("txn mismatch %v != %v", dbTxns[0], expectedTxn)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

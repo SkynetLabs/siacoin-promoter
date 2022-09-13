@@ -3,11 +3,13 @@ package promoter
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
@@ -45,6 +47,15 @@ type (
 		staticThreadCancel context.CancelFunc
 		staticWG           sync.WaitGroup
 	}
+)
+
+var (
+	// txnPollInterval is the interval for polling for transactions from skyd.
+	txnPollInterval = build.Select(build.Var{
+		Dev:      time.Minute,
+		Standard: 10 * time.Minute,
+		Testing:  5 * time.Second,
+	}).(time.Duration)
 )
 
 // New creates a new promoter from the given db credentials.
@@ -114,13 +125,20 @@ func (p *Promoter) Health() Health {
 func (p *Promoter) initBackgroundThreads(f updateFunc) {
 	// Start watching the collection that contains the addresses we want
 	// skyd to watch.
-	p.staticWG.Add(2)
+	p.staticWG.Add(1)
 	go func() {
 		defer p.staticWG.Done()
 		p.threadedAddressWatcher(p.staticBGCtx, f)
-
+	}()
+	p.staticWG.Add(1)
+	go func() {
 		defer p.staticWG.Done()
 		p.threadedPruneLocks()
+	}()
+	p.staticWG.Add(1)
+	go func() {
+		defer p.staticWG.Done()
+		p.threadedPollTransactions()
 	}()
 }
 
@@ -163,4 +181,72 @@ func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd []WatchedAddress, 
 		}
 	}
 	return
+}
+
+// threadedCreditTransactions continuously polls the db for uncreditted txns and
+// notifies the credit promoter about them.
+func (p *Promoter) threadedCreditTransactions() {
+	// TODO: Fetch all txns with credited == false.
+
+	// TODO: Credit the promoter. NOTE: This needs to be idempotent so we
+	// include a txn ID in the request. Requesting a credit with the same
+	// txn ID should still only credit it once.
+
+	// TODO: Update the credited txns in the database as credited = true.
+}
+
+// threadedPollTransactions continuously polls skyd for transactions related to
+// watched addresses and writes them to the DB.
+func (p *Promoter) threadedPollTransactions() {
+	t := time.NewTicker(txnPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-p.staticBGCtx.Done():
+			return
+		case <-t.C:
+		}
+		p.staticLogger.WithTime(time.Now().UTC()).Info("Starting to poll transactions from skyd")
+
+		// Get used addresses.
+		c, err := p.staticColWatchedAddresses().Find(p.staticBGCtx, bson.M{
+			"user_id": bson.M{
+				"$exists": true,
+				"$ne":     "",
+			},
+		})
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch used addresses")
+			continue
+		}
+
+		// For each one get the related txns from skyd and save them to
+		// the db.
+		var nAddresssInserted, nTxnsInserted int
+		// Get addresses.
+		var was []WatchedAddress
+		if err := c.All(p.staticBGCtx, &was); err != nil {
+			p.staticLogger.WithError(err).Error("Failed to decode address")
+			continue // try next address
+		}
+
+		for _, wa := range was {
+			// Fetch related txns from skyd.
+			txns, err := p.staticTxnsByAddress(wa.Address)
+			if err != nil {
+				p.staticLogger.WithError(err).Error("Failed to fetch txns from skyd")
+				break // skyd is offline, wait for next interval
+			}
+
+			// Insert txns.
+			n, err := p.staticInsertTransactions(txns)
+			nTxnsInserted += n
+			if err != nil {
+				p.staticLogger.WithError(err).Error("Failed to insert txns into db")
+				break // db is malfunctioning, wait for next interval
+			}
+			nAddresssInserted++
+		}
+		p.staticLogger.WithTime(time.Now().UTC()).Infof("Inserted %v transactions for %v addresses", nTxnsInserted, nAddresssInserted)
+	}
 }
