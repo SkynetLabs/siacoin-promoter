@@ -16,6 +16,7 @@ func TestParseConfig(t *testing.T) {
 	//
 	// Sets the environment to sane values
 	uri, user, password, logLevel, serverDomain := "URI", "user", "password", logrus.ErrorLevel, "server.com"
+	accountAPIAddress := "accounts"
 	opts := client.Options{
 		Address:   ":9980",
 		UserAgent: "agent",
@@ -30,7 +31,8 @@ func TestParseConfig(t *testing.T) {
 		err6 := os.Setenv(envSkydAPIUserAgent, opts.UserAgent)
 		err7 := os.Setenv(envSiaAPIPassword, opts.Password)
 		err8 := os.Setenv(envServerDomain, serverDomain)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
+		err9 := os.Setenv(envAccountsAPIAddr, accountAPIAddress)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,7 +77,8 @@ func TestParseConfig(t *testing.T) {
 		err6 := os.Unsetenv(envSkydAPIUserAgent)
 		err7 := os.Unsetenv(envSiaAPIPassword)
 		err8 := os.Unsetenv(envServerDomain)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8); err != nil {
+		err9 := os.Unsetenv(envAccountsAPIAddr)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9); err != nil {
 			t.Fatal(err)
 		}
 	}()
@@ -160,6 +163,16 @@ func TestParseConfig(t *testing.T) {
 	// Case 8: No server domain.
 	setEnv()
 	if err := os.Unsetenv(envServerDomain); err != nil {
+		t.Fatal(err)
+	}
+	err = assertConfig(uri, user, password, logrus.InfoLevel, opts)
+	if !errors.Contains(err, errParseFailed) {
+		t.Fatal(err)
+	}
+
+	// Case 9: No accounts API address.
+	setEnv()
+	if err := os.Unsetenv(envAccountsAPIAddr); err != nil {
 		t.Fatal(err)
 	}
 	err = assertConfig(uri, user, password, logrus.InfoLevel, opts)
