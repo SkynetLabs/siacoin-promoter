@@ -21,13 +21,14 @@ type (
 	// config contains the configuration for the service which is parsed
 	// from the environment vars.
 	config struct {
-		LogLevel     logrus.Level
-		Port         int
-		DBURI        string
-		DBUser       string
-		DBPassword   string
-		ServerDomain string
-		SkydOpts     client.Options
+		AccountsAPIAddr string
+		LogLevel        logrus.Level
+		Port            int
+		DBURI           string
+		DBUser          string
+		DBPassword      string
+		ServerDomain    string
+		SkydOpts        client.Options
 	}
 )
 
@@ -38,6 +39,9 @@ const (
 	// defaultSkydUserAgent defines the default agent used when no other
 	// value is specified by the user.
 	defaultSkydUserAgent = "Sia-Agent"
+
+	// envAccountsAPIAddr is the address of the accounts API.
+	envAccountsAPIAddr = "ACCOUNTS_API_ADDRESS"
 
 	// envAPIShutdownTimeout is the timeout for gracefully shutting down the
 	// API before killing it.
@@ -95,6 +99,14 @@ func parseConfig() (*config, error) {
 			return nil, errors.AddContext(err, "failed to parse log level")
 		}
 	}
+	cfg.AccountsAPIAddr, ok = os.LookupEnv(envAccountsAPIAddr)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envAccountsAPIAddr)
+	}
+	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)
+	}
 	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)
@@ -151,8 +163,15 @@ func main() {
 		logger.WithError(err).Fatal("Failed to connect to skyd")
 	}
 
+	// Connect to accounts.
+	accountsClient := promoter.NewAccountsClient(cfg.AccountsAPIAddr)
+	_, err = accountsClient.Health()
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to connect to accounts")
+	}
+
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
+	db, err := promoter.New(ctx, accountsClient, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}

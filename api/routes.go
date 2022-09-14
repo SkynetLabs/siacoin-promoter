@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"go.sia.tech/siad/types"
 )
 
 type (
@@ -11,6 +12,11 @@ type (
 	HealthGET struct {
 		DBAlive   bool `json:"dbalive"`
 		SkydAlive bool `json:"skydalive"`
+	}
+
+	// UserAddressPOST is the type returned by the /address endpoint.
+	UserAddressPOST struct {
+		Address types.UnlockHash `json:"address"`
 	}
 )
 
@@ -26,4 +32,9 @@ func (api *API) healthGET(w http.ResponseWriter, req *http.Request, _ httprouter
 		DBAlive:   ph.Database == nil,
 		SkydAlive: ph.Skyd == nil,
 	})
+}
+
+func (api *API) userAddressPOST(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+	// Get sub from accounts service.
+
 }

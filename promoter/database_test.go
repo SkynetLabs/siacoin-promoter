@@ -69,7 +69,7 @@ func TestAddressWatcher(t *testing.T) {
 		return nil
 	}
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), updateFn)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), "", updateFn)
 	if err != nil {
 		t.Fatal(err)
 	}
