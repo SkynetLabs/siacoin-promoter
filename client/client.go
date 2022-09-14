@@ -47,14 +47,55 @@ func readAPIError(r io.Reader) error {
 }
 
 // get performs a GET request on the provided resource.
-func (c *Client) get(resource string) (*http.Response, error) {
-	return http.DefaultClient.Get(c.staticAddr + resource)
+func (c *Client) get(resource string, headers map[string]string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", c.staticAddr+resource, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultClient.Do(req)
 }
 
-// getJSON performs a GET request on the provided resource and tries to json
+// post performs a POST request on the provided resource.
+func (c *Client) post(resource string, headers map[string]string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest("POST", c.staticAddr+resource, body)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultClient.Do(req)
+}
+
+// GetJSONWithHeaders performs a GET request on the provided resource and tries
+// to json decode the response body into the provided object.
+func (c *Client) GetJSONWithHeaders(resource string, headers map[string]string, obj interface{}) error {
+	resp, err := c.get(resource, headers)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check for 200 since we expect a successful response with body.
+	if resp.StatusCode != http.StatusOK {
+		return readAPIError(resp.Body)
+	}
+
+	dec := json.NewDecoder(resp.Body)
+	return dec.Decode(obj)
+}
+
+// GetJSON performs a GET request on the provided resource and tries to json
 // decode the response body into the provided object.
 func (c *Client) GetJSON(resource string, obj interface{}) error {
-	resp, err := c.get(resource)
+	return c.GetJSONWithHeaders(resource, nil, obj)
+}
+
+func (c *Client) PostJSONWithHeaders(resource string, headers map[string]string, obj interface{}) error {
+	resp, err := c.post(resource, headers, nil)
 	if err != nil {
 		return err
 	}

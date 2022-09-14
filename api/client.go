@@ -1,6 +1,9 @@
 package api
 
-import "github.com/SkynetLabs/siacoin-promoter/client"
+import (
+	"github.com/SkynetLabs/siacoin-promoter/client"
+	"go.sia.tech/siad/types"
+)
 
 // PromoterClient provides a library for communicating with the promoter's API.
 type PromoterClient struct {
@@ -18,4 +21,16 @@ func NewClient(addr string) *PromoterClient {
 func (c *PromoterClient) Health() (hg HealthGET, err error) {
 	err = c.GetJSON("/health", &hg)
 	return
+}
+
+// Address returns the active address for a given user to send money to. The
+// user is identified by the specified authentication header which should
+// contain a valid JWT.
+func (c *PromoterClient) Address(authHeader string) (types.UnlockHash, error) {
+	headers := map[string]string{
+		"Authorization": authHeader,
+	}
+	var uap UserAddressPOST
+	err := c.Client.PostJSONWithHeaders("/address", headers, &uap)
+	return uap.Address, err
 }

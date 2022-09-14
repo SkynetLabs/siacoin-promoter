@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,9 +54,31 @@ func (t *Tester) Close() error {
 	return t.shutDownErr
 }
 
-func newAccountsMock() *http.Server {
+func newAccountsMock() *httptest.Server {
 	router := httprouter.New()
-	accountsSrv := httptest.NewServer(router)
+	// Health route.
+	router.GET("/health", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(promoter.AccountsHealthGET{
+			DBAlive: true,
+		})
+	})
+	// User route.
+	router.GET("/user", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		// Require that the Authorization header is set.
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// Return the authorization header as the sub. That way we can
+		// verify that the header is forwarded correctly.
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(promoter.AccountsUserGET{
+			Sub: authHeader,
+		})
+	})
+	return httptest.NewServer(router)
 }
 
 // newTester creates a new, ready-to-go tester.
@@ -66,7 +89,7 @@ func newTester(skydClient *client.Client, server string) (*Tester, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
-	db, err := newTestPromoter(skydClient, server, "")
+	db, err := newTestPromoter(skydClient, server, accountsSrv.URL)
 	if err != nil {
 		return nil, err
 	}

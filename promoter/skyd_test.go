@@ -15,7 +15,7 @@ func TestWatchedSkydAddresses(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestProcessAddressUpdate(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestTxnsByAddress(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
