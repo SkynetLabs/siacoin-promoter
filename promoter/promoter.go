@@ -12,7 +12,6 @@ import (
 	"gitlab.com/SkynetLabs/skyd/node/api/client"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.sia.tech/siad/build"
 	"go.sia.tech/siad/types"
 )
@@ -209,6 +208,7 @@ LOOP:
 			// about yet.
 			currentTime := time.Now().UTC()
 			sr := p.staticColTransactions().FindOneAndUpdate(p.staticBGCtx, bson.M{
+				"credited": false,
 				"credited_at": bson.M{
 					"$lt": currentTime.Add(-txnPollInterval),
 				},
@@ -216,7 +216,7 @@ LOOP:
 				"$set": bson.M{
 					"credited_at": currentTime,
 				},
-			}, options.FindOneAndUpdate())
+			})
 			if errors.Contains(sr.Err(), mongo.ErrNoDocuments) {
 				continue LOOP // no more txns in this iteration
 			}
@@ -228,6 +228,7 @@ LOOP:
 			// Decode txn.
 			var txn Transaction
 			if err := sr.Decode(&txn); err != nil {
+				build.Critical(fmt.Sprintf("failed to decode txn: %v", err))
 				p.staticLogger.WithError(err).Error("Failed to decode txn")
 				continue // try next txn
 			}
@@ -237,6 +238,7 @@ LOOP:
 				"_id": txn.Address,
 			})
 			if errors.Contains(sr.Err(), mongo.ErrNoDocuments) {
+				build.Critical("Address for txn doesn't exist - this should never happen")
 				p.staticLogger.WithError(sr.Err()).Error("Address for txn doesn't exist")
 				continue // try next
 			}
@@ -246,6 +248,7 @@ LOOP:
 			}
 			var wa WatchedAddress
 			if err := sr.Decode(&wa); err != nil {
+				build.Critical(fmt.Sprintf("failed to decode address: %v", err))
 				p.staticLogger.WithError(sr.Err()).Error("Failed to decode address for txn")
 				continue // try next
 			}
