@@ -94,6 +94,7 @@ func (c *Client) GetJSON(resource string, obj interface{}) error {
 	return c.GetJSONWithHeaders(resource, nil, obj)
 }
 
+// PostJSONWithHeaders performs a POST request o the provided resource.
 func (c *Client) PostJSONWithHeaders(resource string, headers map[string]string, obj interface{}) error {
 	resp, err := c.post(resource, headers, nil)
 	if err != nil {
