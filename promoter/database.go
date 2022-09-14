@@ -89,9 +89,10 @@ type (
 	// and as a reference for which transactions we credited the user for
 	// already by contacting the credit promoter.
 	Transaction struct {
-		Address  types.UnlockHash    `bson:"address_id"`
-		Credited bool                `bson:"credited"`
-		TxnID    types.TransactionID `bson:"_id"`
+		Address    types.UnlockHash    `bson:"address_id"`
+		Credited   bool                `bson:"credited"`
+		CreditedAt time.Time           `bson:"credited_at"`
+		TxnID      types.TransactionID `bson:"_id"`
 
 		// Value is a stringified types.Currency since types.Currency is too large for
 		// other types and Mongo can't seem to deal with it.
