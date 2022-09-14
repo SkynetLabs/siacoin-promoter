@@ -221,3 +221,85 @@ func TestPollTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCreditTransactions is a unit test for threadedTestCreditTransactions.
+func TestCreditTransactions(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Parallel()
+
+	p, node, err := newTestPromoter(t.Name(), t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Fill the database with addresses by running address regeneration once
+	// manually.
+	p.threadedRegenerateAddresses()
+
+	// Get an address for a user.
+	user := "user"
+	addr, err := p.AddressForUser(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Send money to that address.
+	wsp, err := node.WalletSiacoinsPost(types.SiacoinPrecision, addr, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mine it.
+	if err := node.MineBlock(); err != nil {
+		t.Fatal(err)
+	}
+
+	// After a while we should find a credited txn.
+	expectedTxn := Transaction{
+		Address:  addr,
+		Credited: true,
+		TxnID:    wsp.TransactionIDs[len(wsp.TransactionIDs)-1],
+		Value:    types.SiacoinPrecision.String(),
+	}
+	err = build.Retry(200, 100*time.Millisecond, func() error {
+		c, err := p.staticColTransactions().Find(context.Background(), bson.M{})
+		if err != nil {
+			return err
+		}
+		var dbTxns []Transaction
+		if err := c.All(context.Background(), &dbTxns); err != nil {
+			t.Fatal(err)
+		}
+		if len(dbTxns) != 1 {
+			return fmt.Errorf("expected 1 txn but got %v", len(dbTxns))
+		}
+		// Check that the timestamp is not 0 before setting it to 0
+		// since DeepEqual will fail otherwise. We don't know the exact
+		// timestamp so we can only estimate the range.
+		txn := dbTxns[0]
+		if txn.CreditedAt.IsZero() || txn.CreditedAt.After(time.Now().UTC()) {
+			return fmt.Errorf("wrong timerange 0 < %v < %v", txn.CreditedAt, time.Now().UTC())
+		}
+		txn.CreditedAt = time.Time{}
+		if !reflect.DeepEqual(txn, expectedTxn) {
+			return fmt.Errorf("txn mismatch %v != %v", dbTxns[0], expectedTxn)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// TODO: Check that it was credited in the credit system as well and
+	// only once.
+}

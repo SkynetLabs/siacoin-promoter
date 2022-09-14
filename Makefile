@@ -95,11 +95,6 @@ release-race:
 release-util:
 	go install -tags='netgo' -ldflags='-s -w $(ldflags)' $(release-pkgs) $(util-pkgs)
 
-# check is a development helper that ensures all test files at least build
-# without actually running the tests.
-check:
-	go test --exec=true ./...
-
 bench: fmt
 	go test -tags='debug testing netgo' -timeout=500s -run=XXX -bench=. $(pkgs) -count=$(count)
 
@@ -112,4 +107,4 @@ test-long-ci:
 	@mkdir -p cover
 	GORACE='$(racevars)' go test -race --coverprofile='./cover/cover.out' -v -failfast -tags='testing debug netgo' -timeout=600s $(pkgs) -run=$(run) -count=$(count)
 
-.PHONY: all deps fmt install release clean check test test-long test-long-ci start-mongo stop-mongo
+.PHONY: all deps fmt release clean test test-long test-long-ci start-mongo stop-mongo

@@ -40,7 +40,7 @@ func (c *Client) get(resource string) (*http.Response, error) {
 // getJSON performs a GET request on the provided resource and tries to json
 // decode the response body into the provided object.
 func (c *Client) getJSON(resource string, obj interface{}) error {
-	resp, err := c.get("/health")
+	resp, err := c.get(resource)
 	if err != nil {
 		return err
 	}
