@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SkynetLabs/siacoin-promoter/api"
+	"github.com/SkynetLabs/siacoin-promoter/dependencies"
 	"github.com/SkynetLabs/siacoin-promoter/promoter"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
@@ -175,7 +176,7 @@ func main() {
 	}
 
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, accountsClient, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
+	db, err := promoter.New(ctx, dependencies.ProdDependencies, accountsClient, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}
