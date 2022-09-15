@@ -41,7 +41,8 @@ type (
 		// inserted or the length of the collection be requested.
 		staticLockClient *lock.Client
 
-		staticSkyd *client.Client
+		staticAccounts *AccountsClient
+		staticSkyd     *client.Client
 
 		staticCtx          context.Context
 		staticBGCtx        context.Context
@@ -60,12 +61,12 @@ var (
 )
 
 // New creates a new promoter from the given db credentials.
-func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
+func New(ctx context.Context, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
 	client, err := connect(ctx, log, uri, username, password)
 	if err != nil {
 		return nil, err
 	}
-	p, err := newPromoter(ctx, skyd, log, client, domain, db)
+	p, err := newPromoter(ctx, ac, skyd, log, client, domain, db)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func New(ctx context.Context, skyd *client.Client, log *logrus.Entry, uri, usern
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
+func newPromoter(ctx context.Context, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
 	// Grab database from client.
 	database := client.Database(db)
 
@@ -83,6 +84,7 @@ func newPromoter(ctx context.Context, skyd *client.Client, log *logrus.Entry, cl
 
 	// Create store.
 	p := &Promoter{
+		staticAccounts:     ac,
 		staticBGCtx:        bgCtx,
 		staticThreadCancel: cancel,
 		staticCtx:          ctx,

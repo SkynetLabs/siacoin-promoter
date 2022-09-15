@@ -21,13 +21,14 @@ type (
 	// config contains the configuration for the service which is parsed
 	// from the environment vars.
 	config struct {
-		LogLevel     logrus.Level
-		Port         int
-		DBURI        string
-		DBUser       string
-		DBPassword   string
-		ServerDomain string
-		SkydOpts     client.Options
+		AccountsAPIAddr string
+		LogLevel        logrus.Level
+		Port            int
+		DBURI           string
+		DBUser          string
+		DBPassword      string
+		ServerDomain    string
+		SkydOpts        client.Options
 	}
 )
 
@@ -38,6 +39,12 @@ const (
 	// defaultSkydUserAgent defines the default agent used when no other
 	// value is specified by the user.
 	defaultSkydUserAgent = "Sia-Agent"
+
+	// envAccountsHost is the address of the accounts API.
+	envAccountsHost = "ACCOUNTS_HOST"
+
+	// envAccountsPort is the port the accounts service listens on.
+	envAccountsPort = "ACCOUNTS_PORT"
 
 	// envAPIShutdownTimeout is the timeout for gracefully shutting down the
 	// API before killing it.
@@ -95,6 +102,15 @@ func parseConfig() (*config, error) {
 			return nil, errors.AddContext(err, "failed to parse log level")
 		}
 	}
+	accountsHostStr, ok := os.LookupEnv(envAccountsHost)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envAccountsHost)
+	}
+	accountsPortStr, ok := os.LookupEnv(envAccountsPort)
+	if !ok {
+		return nil, fmt.Errorf("%s wasn't specified", envAccountsPort)
+	}
+	cfg.AccountsAPIAddr = fmt.Sprintf("%s:%s", accountsHostStr, accountsPortStr)
 	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)
@@ -151,8 +167,15 @@ func main() {
 		logger.WithError(err).Fatal("Failed to connect to skyd")
 	}
 
+	// Connect to accounts.
+	accountsClient := promoter.NewAccountsClient(cfg.AccountsAPIAddr)
+	_, err = accountsClient.Health()
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to connect to accounts")
+	}
+
 	// Create the promoter that talks to skyd and the database.
-	db, err := promoter.New(ctx, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
+	db, err := promoter.New(ctx, accountsClient, skydClient, dbLogger, cfg.DBURI, cfg.DBUser, cfg.DBPassword, cfg.ServerDomain, dbName)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to database")
 	}

@@ -23,23 +23,11 @@ type (
 		staticServer   *http.Server
 	}
 
-	// Error is the error type returned by the API in case the status code
-	// is not a 2xx code.
-	Error struct {
-		Message string `json:"message"`
-	}
-
 	// errorWrap is a helper type for converting an `error` struct to JSON.
 	errorWrap struct {
 		Message string `json:"message"`
 	}
 )
-
-// Error implements the error interface for the Error type. It returns only the
-// Message field.
-func (err Error) Error() string {
-	return err.Message
-}
 
 // New creates a new API with the given logger and database.
 func New(log *logrus.Entry, p *promoter.Promoter, port int) (*API, error) {

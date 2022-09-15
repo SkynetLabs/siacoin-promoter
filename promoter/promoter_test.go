@@ -20,15 +20,20 @@ import (
 
 // newTestPromoter creates a Promoter instance for testing
 // without the background threads being launched.
-func newTestPromoter(name, dbName string) (*Promoter, *siatest.TestNode, error) {
+func newTestPromoter(name, dbName, accountsAddr string) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
+
+	// Create skyd.
 	skyd, err := utils.NewSkydForTesting(name)
 	if err != nil {
 		return nil, nil, err
 	}
-	p, err := New(context.Background(), &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name, dbName)
+
+	// Create promoter.
+	ac := NewAccountsClient(accountsAddr)
+	p, err := New(context.Background(), ac, &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name, dbName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -36,7 +41,7 @@ func newTestPromoter(name, dbName string) (*Promoter, *siatest.TestNode, error) 
 }
 
 // newTestPromoterWithUpdateFunc creates a Promoter instance for testing.
-func newTestPromoterWithUpdateFunc(name, dbName string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
+func newTestPromoterWithUpdateFunc(name, dbName, accountsAddr string, f updateFunc) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -51,7 +56,8 @@ func newTestPromoterWithUpdateFunc(name, dbName string, f updateFunc) (*Promoter
 	if err != nil {
 		return nil, nil, err
 	}
-	p, err := newPromoter(context.Background(), &skyd.Client, logEntry, client, name, dbName)
+	ac := NewAccountsClient(accountsAddr)
+	p, err := newPromoter(context.Background(), ac, &skyd.Client, logEntry, client, name, dbName)
 	if err != nil {
 		return nil, nil, errors.Compose(err, client.Disconnect(ctx))
 	}
@@ -66,7 +72,7 @@ func TestPromoterHealth(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +96,7 @@ func TestAddrDiff(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), func(_ bool, _ ...WatchedAddressUpdate) error {
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), "", func(_ bool, _ ...WatchedAddressUpdate) error {
 		// Don't do anything.
 		return nil
 	})
@@ -157,7 +163,7 @@ func TestPollTransactions(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +235,7 @@ func TestCreditTransactions(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

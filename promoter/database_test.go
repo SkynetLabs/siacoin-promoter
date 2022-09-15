@@ -69,7 +69,7 @@ func TestAddressWatcher(t *testing.T) {
 		return nil
 	}
 
-	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), updateFn)
+	p, node, err := newTestPromoterWithUpdateFunc(t.Name(), t.Name(), "", updateFn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestAddressWatcher(t *testing.T) {
 		return nil
 	}
 
-	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", t.Name(), f2)
+	p2, node2, err := newTestPromoterWithUpdateFunc(t.Name()+"2", t.Name(), "", f2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestWatchedDBAddresses(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestShouldGenerateAddresses(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestAddressForUser(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestInsertTransactions(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name())
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
