@@ -204,6 +204,13 @@ LOOP:
 		case <-t.C:
 		}
 
+		// Get credit conversion rate at the beginning of this iteration.
+		cr, err := p.staticConversionRate()
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch siacoin conversion rate")
+			continue // retry later
+		}
+
 		// Loop over txns one-by-one.
 		for {
 			// Fetch an transaction that the credit system doesn't know
@@ -263,7 +270,7 @@ LOOP:
 			}
 
 			// Send txn to credit system.
-			if err := p.staticCreditTxn(wa.UserSub, txn.TxnID, amt); err != nil {
+			if err := p.staticCreditTxn(wa.UserSub, txn.TxnID, amt, cr); err != nil {
 				p.staticLogger.WithError(sr.Err()).Error("Failed to submit txn to credit system")
 				continue LOOP // something is wrong with the credit system - skip iteration
 			}

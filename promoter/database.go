@@ -2,6 +2,7 @@ package promoter
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -11,6 +12,7 @@ import (
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -19,6 +21,7 @@ import (
 )
 
 const (
+	colConfigName           = "config"
 	colLocksName            = "locks"
 	colWatchedAddressesName = "watched_addresses"
 	colTransactionsName     = "transactions"
@@ -40,6 +43,9 @@ var filterUnusedAddresses = bson.M{
 }
 
 var (
+	// defaultConversionRate from SC to Credits is 1 SC -> 1 Credit.
+	defaultConversionRate = new(big.Rat).SetFrac(big.NewInt(1), types.SiacoinPrecision.Big())
+
 	// minUnusedAddresses is the min number of addresses we want to keep in
 	// the db which are not yet assigned to users. If the number drops below
 	// this, we generate more addresses.
@@ -60,6 +66,10 @@ var (
 	// updateMaxBatchSize is the max number of addresses we send to skyd
 	// within a single API request.
 	updateMaxBatchSize = minUnusedAddresses
+
+	// configIDConversionRate is the ID of the currency conversion rate in
+	// the config collection.
+	configIDConversionRate = primitive.ObjectID{1}
 )
 
 type (
@@ -73,15 +83,17 @@ type (
 	// For deletions it will always be set to 'false'.
 	updateFunc func(unused bool, updates ...WatchedAddressUpdate) error
 
+	// ConfigConversionRate is the representation of the conversion rate
+	// within the db. To preserve precision up until the point of actually
+	// converting siacoins to credits, we use a numerator/denominator pair.
+	ConfigConversionRate struct {
+		Numerator   string `bson:"numerator"`
+		Denominator string `bson:"denominator"`
+	}
+
 	// User is the type of a user in the database.
-	// TODO: f/u with API endpoint for creating users and assigning
-	// addresses.
 	User struct {
 		Sub string `bson:"_id"`
-
-		// TODO: f/u with a PR to poll for transactions. Store them in a
-		// transactions array together with the amount of incoming funds
-		// after the promoter service was notified of the new txn.
 	}
 
 	// Transaction describes a single transaction within the transaction
@@ -133,6 +145,21 @@ type (
 		OperationType operationType
 	}
 )
+
+// Rat returns the conversion rate as a big.Rat.
+func (cr ConfigConversionRate) Rat() (*big.Rat, bool) {
+	num, ok := new(big.Int).SetString(cr.Numerator, 10)
+	if !ok {
+		build.Critical("failed to parse numerator")
+		return nil, false
+	}
+	denom, ok := new(big.Int).SetString(cr.Denominator, 10)
+	if !ok {
+		build.Critical("failed to parse denominator")
+		return nil, false
+	}
+	return new(big.Rat).SetFrac(num, denom), true
+}
 
 // ToUpdate turns the WatchedAddressDBUpdate into a WatchedAddressUpdate.
 func (u *WatchedAddressDBUpdate) ToUpdate() WatchedAddressUpdate {
@@ -250,6 +277,47 @@ func (p *Promoter) staticColTransactions() *mongo.Collection {
 // addresses.
 func (p *Promoter) staticColWatchedAddresses() *mongo.Collection {
 	return p.staticDB.Collection(colWatchedAddressesName)
+}
+
+// staticColConfig returns the collection used to store config values.
+func (p *Promoter) staticColConfig() *mongo.Collection {
+	return p.staticDB.Collection(colConfigName)
+}
+
+// staticConversionRate returns the current conversion rate as configured in the
+// database or initialises it.
+func (p *Promoter) staticConversionRate() (*big.Rat, error) {
+	// Find the setting.
+	sr := p.staticColConfig().FindOne(p.staticBGCtx, bson.M{
+		"_id": configIDConversionRate,
+	})
+	var ccr ConfigConversionRate
+	err := sr.Decode(&ccr)
+
+	// If it doesn't exist yet, set it to the default and return the default
+	// conversion rate.
+	if errors.Contains(err, mongo.ErrNoDocuments) {
+		// If the config value isn't set yet, set it to the default.
+		_, err := p.staticColConfig().InsertOne(p.staticBGCtx, bson.M{
+			"_id":         configIDConversionRate,
+			"numerator":   defaultConversionRate.Num().String(),
+			"denominator": defaultConversionRate.Denom().String(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return defaultConversionRate, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Otherwise return the value from the db.
+	cr, ok := ccr.Rat()
+	if !ok {
+		return nil, errors.New("failed to convert conversation rate to big.Rat")
+	}
+	return cr, nil
 }
 
 // staticShouldGenerateAddresses returns whether or not we should try to
@@ -440,7 +508,7 @@ func (p *Promoter) threadedRegenerateAddresses() {
 		}
 	}()
 
-	// TODO: check number of unused addresses.
+	// Check number of unused addresses.
 	n, err := p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
 	if err != nil {
 		p.staticLogger.WithError(err).Error("Failed to fetch count of unused addresses for generating new ones")
