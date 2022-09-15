@@ -38,7 +38,7 @@ func (api *API) healthGET(w http.ResponseWriter, req *http.Request, _ httprouter
 // userAddressPOST is the handler for the /address endpoint.
 func (api *API) userAddressPOST(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
 	// Get sub from accounts service.
-	sub, err := api.staticPromoter.SubFromAuthorizationHeader(req.Header.Get("Authorization"))
+	sub, err := api.staticPromoter.SubFromAuthorizationHeader(req.Header)
 	if err != nil {
 		api.WriteError(w, err, http.StatusBadRequest)
 		return

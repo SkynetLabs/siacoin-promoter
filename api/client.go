@@ -26,10 +26,7 @@ func (c *PromoterClient) Health() (hg HealthGET, err error) {
 // Address returns the active address for a given user to send money to. The
 // user is identified by the specified authentication header which should
 // contain a valid JWT.
-func (c *PromoterClient) Address(authHeader string) (types.UnlockHash, error) {
-	headers := map[string]string{
-		"Authorization": authHeader,
-	}
+func (c *PromoterClient) Address(headers map[string]string) (types.UnlockHash, error) {
 	var uap UserAddressPOST
 	err := c.Client.PostJSONWithHeaders("/address", headers, &uap)
 	return uap.Address, err

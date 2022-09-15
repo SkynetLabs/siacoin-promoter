@@ -46,16 +46,22 @@ func readAPIError(r io.Reader) error {
 	return apiErr
 }
 
+// do attaches the given headers to a request and then executes it using the
+// default client.
+func (c *Client) do(req *http.Request, headers map[string]string) (*http.Response, error) {
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultClient.Do(req)
+}
+
 // get performs a GET request on the provided resource.
 func (c *Client) get(resource string, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", c.staticAddr+resource, nil)
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	return http.DefaultClient.Do(req)
+	return c.do(req, headers)
 }
 
 // post performs a POST request on the provided resource.
@@ -64,10 +70,7 @@ func (c *Client) post(resource string, headers map[string]string, body io.Reader
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	return http.DefaultClient.Do(req)
+	return c.do(req, headers)
 }
 
 // GetJSONWithHeaders performs a GET request on the provided resource and tries

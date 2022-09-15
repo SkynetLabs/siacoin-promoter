@@ -1,6 +1,8 @@
 package test
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,12 +64,20 @@ func TestAddressEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The mocked accounts service will use the authorization and cookie
+	// headers to derive a user sub. So we set them to foo and bar to get
+	// the sub foo-bar.
+	userSub := "foo-bar"
+	headers := map[string]string{
+		"Authorization": strings.Split(userSub, "-")[0],
+		"Cookie":        strings.Split(userSub, "-")[1],
+	}
+
 	// Get address for a user.
-	userSub := "user"
 	var addr types.UnlockHash
 	err = build.Retry(100, 100*time.Millisecond, func() error {
 		var err error
-		addr, err = tester.PromoterClient.Address(userSub)
+		addr, err = tester.PromoterClient.Address(headers)
 		if err != nil {
 			return err
 		}
@@ -81,11 +91,29 @@ func TestAddressEndpoint(t *testing.T) {
 	}
 
 	// Call it one more time.
-	addr2, err := tester.PromoterClient.Address(userSub)
+	addr2, err := tester.PromoterClient.Address(headers)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if addr != addr2 {
 		t.Fatal("addresses don't match", addr, addr2)
+	}
+
+	// Create a promoter for checking the db directly for the expected sub.
+	p, err := newTestPromoter(&node.Client, t.Name(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	addr3, err := p.AddressForUser(context.Background(), userSub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr != addr3 {
+		t.Fatal("addresses don't match", addr, addr3)
 	}
 }

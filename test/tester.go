@@ -71,11 +71,16 @@ func newAccountsMock() *httptest.Server {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		// Return the authorization header as the sub. That way we can
-		// verify that the header is forwarded correctly.
+		cookieHeader := r.Header.Get("Cookie")
+		if cookieHeader == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// Derive the sub from the authorization and cookie header in
+		// testing.
 		enc := json.NewEncoder(w)
 		_ = enc.Encode(promoter.AccountsUserGET{
-			Sub: authHeader,
+			Sub: fmt.Sprintf("%v-%v", authHeader, cookieHeader),
 		})
 	})
 	return httptest.NewServer(router)

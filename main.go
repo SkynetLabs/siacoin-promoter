@@ -40,8 +40,11 @@ const (
 	// value is specified by the user.
 	defaultSkydUserAgent = "Sia-Agent"
 
-	// envAccountsAPIAddr is the address of the accounts API.
-	envAccountsAPIAddr = "ACCOUNTS_API_ADDRESS"
+	// envAccountsHost is the address of the accounts API.
+	envAccountsHost = "ACCOUNTS_HOST"
+
+	// envAccountsPort is the port the accounts service listens on.
+	envAccountsPort = "ACCOUNTS_PORT"
 
 	// envAPIShutdownTimeout is the timeout for gracefully shutting down the
 	// API before killing it.
@@ -99,14 +102,15 @@ func parseConfig() (*config, error) {
 			return nil, errors.AddContext(err, "failed to parse log level")
 		}
 	}
-	cfg.AccountsAPIAddr, ok = os.LookupEnv(envAccountsAPIAddr)
+	accountsHostStr, ok := os.LookupEnv(envAccountsHost)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", envAccountsAPIAddr)
+		return nil, fmt.Errorf("%s wasn't specified", envAccountsHost)
 	}
-	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
+	accountsPortStr, ok := os.LookupEnv(envAccountsPort)
 	if !ok {
-		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)
+		return nil, fmt.Errorf("%s wasn't specified", envAccountsPort)
 	}
+	cfg.AccountsAPIAddr = fmt.Sprintf("%s:%s", accountsHostStr, accountsPortStr)
 	cfg.DBURI, ok = os.LookupEnv(envMongoDBURI)
 	if !ok {
 		return nil, fmt.Errorf("%s wasn't specified", envMongoDBURI)

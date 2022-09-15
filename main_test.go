@@ -16,7 +16,7 @@ func TestParseConfig(t *testing.T) {
 	//
 	// Sets the environment to sane values
 	uri, user, password, logLevel, serverDomain := "URI", "user", "password", logrus.ErrorLevel, "server.com"
-	accountAPIAddress := "accounts"
+	accountHost, accountPort := "127.0.0.1", "1234"
 	opts := client.Options{
 		Address:   ":9980",
 		UserAgent: "agent",
@@ -31,14 +31,15 @@ func TestParseConfig(t *testing.T) {
 		err6 := os.Setenv(envSkydAPIUserAgent, opts.UserAgent)
 		err7 := os.Setenv(envSiaAPIPassword, opts.Password)
 		err8 := os.Setenv(envServerDomain, serverDomain)
-		err9 := os.Setenv(envAccountsAPIAddr, accountAPIAddress)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9); err != nil {
+		err9 := os.Setenv(envAccountsHost, accountHost)
+		err10 := os.Setenv(envAccountsPort, accountPort)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9, err10); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Asserts a parsed config against provided values.
 	errParseFailed := errors.New("parseConfig failed")
-	assertConfig := func(uri, user, password string, logLevel logrus.Level, skydOpts client.Options) error {
+	assertConfig := func(uri, user, password, serverDomain, accountHost, accountPort string, logLevel logrus.Level, skydOpts client.Options) error {
 		cfg, err := parseConfig()
 		if err != nil {
 			return errParseFailed
@@ -64,6 +65,12 @@ func TestParseConfig(t *testing.T) {
 		if cfg.SkydOpts.Password != skydOpts.Password {
 			return fmt.Errorf("skydOpt.Password mismatch: %v != %v", cfg.SkydOpts.Password, skydOpts.Password)
 		}
+		if cfg.ServerDomain != serverDomain {
+			return fmt.Errorf("skydOpt.ServerDomain mismatch: %v != %v", cfg.ServerDomain, serverDomain)
+		}
+		if accountsAddr := fmt.Sprintf("%s:%s", accountHost, accountPort); cfg.AccountsAPIAddr != accountsAddr {
+			return fmt.Errorf("skydOpt.AccountsAPIAddr mismatch: %v != %v", cfg.AccountsAPIAddr, accountsAddr)
+		}
 		return nil
 	}
 
@@ -77,15 +84,16 @@ func TestParseConfig(t *testing.T) {
 		err6 := os.Unsetenv(envSkydAPIUserAgent)
 		err7 := os.Unsetenv(envSiaAPIPassword)
 		err8 := os.Unsetenv(envServerDomain)
-		err9 := os.Unsetenv(envAccountsAPIAddr)
-		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9); err != nil {
+		err9 := os.Unsetenv(envAccountsHost)
+		err10 := os.Unsetenv(envAccountsPort)
+		if err := errors.Compose(err1, err2, err3, err4, err5, err6, err7, err8, err9, err10); err != nil {
 			t.Fatal(err)
 		}
 	}()
 
 	// Case 1: Sane values.
 	setEnv()
-	if err := assertConfig(uri, user, password, logLevel, opts); err != nil {
+	if err := assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,7 +102,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envLogLevel); err != nil {
 		t.Fatal(err)
 	}
-	if err := assertConfig(uri, user, password, logrus.InfoLevel, opts); err != nil {
+	if err := assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logrus.InfoLevel, opts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +111,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envMongoDBURI); err != nil {
 		t.Fatal(err)
 	}
-	err := assertConfig(uri, user, password, logLevel, opts)
+	err := assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
@@ -113,7 +121,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envMongoDBUser); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
@@ -123,7 +131,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envMongoDBPassword); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
@@ -133,7 +141,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envSkydAPIAddr); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
@@ -145,7 +153,7 @@ func TestParseConfig(t *testing.T) {
 	}
 	optsNoAgent := opts
 	optsNoAgent.UserAgent = defaultSkydUserAgent
-	err = assertConfig(uri, user, password, logLevel, optsNoAgent)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, optsNoAgent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +163,7 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envSiaAPIPassword); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
@@ -165,17 +173,27 @@ func TestParseConfig(t *testing.T) {
 	if err := os.Unsetenv(envServerDomain); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logrus.InfoLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logrus.InfoLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}
 
-	// Case 9: No accounts API address.
+	// Case 9: No accounts host.
 	setEnv()
-	if err := os.Unsetenv(envAccountsAPIAddr); err != nil {
+	if err := os.Unsetenv(envAccountsHost); err != nil {
 		t.Fatal(err)
 	}
-	err = assertConfig(uri, user, password, logrus.InfoLevel, opts)
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logrus.InfoLevel, opts)
+	if !errors.Contains(err, errParseFailed) {
+		t.Fatal(err)
+	}
+
+	// Case 10: No accounts port.
+	setEnv()
+	if err := os.Unsetenv(envAccountsPort); err != nil {
+		t.Fatal(err)
+	}
+	err = assertConfig(uri, user, password, serverDomain, accountHost, accountPort, logrus.InfoLevel, opts)
 	if !errors.Contains(err, errParseFailed) {
 		t.Fatal(err)
 	}

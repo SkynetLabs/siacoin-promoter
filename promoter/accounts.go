@@ -1,6 +1,8 @@
 package promoter
 
 import (
+	"net/http"
+
 	"github.com/SkynetLabs/siacoin-promoter/client"
 )
 
@@ -40,17 +42,18 @@ func (ac *AccountsClient) Health() (ahg AccountsHealthGET, err error) {
 
 // UserSub uses the /user endpoint of the accounts service to return the user's
 // sub.
-func (ac *AccountsClient) UserSub(authorizationHeader string) (string, error) {
+func (ac *AccountsClient) UserSub(headers http.Header) (string, error) {
 	var aug AccountsUserGET
-	headers := map[string]string{
-		"Authorization": authorizationHeader,
+	forwardedHeaders := map[string]string{
+		"Authorization": headers.Get("Authorization"),
+		"Cookie":        headers.Get("Cookie"),
 	}
-	err := ac.GetJSONWithHeaders("/user", headers, &aug)
+	err := ac.GetJSONWithHeaders("/user", forwardedHeaders, &aug)
 	return aug.Sub, err
 }
 
 // SubFromAuthorizationHeader is a convenience method to expose the client's
 // UserSub method through the promoter interface.
-func (p *Promoter) SubFromAuthorizationHeader(authHeader string) (string, error) {
-	return p.staticAccounts.UserSub(authHeader)
+func (p *Promoter) SubFromAuthorizationHeader(headers http.Header) (string, error) {
+	return p.staticAccounts.UserSub(headers)
 }
