@@ -1,7 +1,6 @@
 package promoter
 
 import (
-	"fmt"
 	"math/big"
 
 	"go.sia.tech/siad/types"
@@ -26,10 +25,9 @@ func (p *Promoter) staticCreditTxn(userSub string, txnID types.TransactionID, am
 	credits := convertSCToCredits(amt, cr)
 
 	// Convert credits to a string.
-	creditsStr := credits.FloatString(creditPrecision)
+	_ = credits.FloatString(creditPrecision)
 
 	// TODO: send request.
-	fmt.Println("creditsStr", creditsStr)
 
 	return nil
 }
