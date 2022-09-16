@@ -102,7 +102,13 @@ func TestDeadServer(t *testing.T) {
 
 	// Fetch another address. Shouldn't be the same since the old one
 	// belonged to this server and was marked as !primary.
-	addrNew, err := tester.Address(headers)
+	// We do this in a loop since the pool of addresses was cleared in will
+	// be regenerated in the background.
+	var addrNew types.UnlockHash
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		addrNew, err = tester.Address(headers)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
