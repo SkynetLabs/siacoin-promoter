@@ -502,14 +502,14 @@ func TestAddressForUser(t *testing.T) {
 		t.Fatalf("should have 0 unused addresses but got %v", n)
 	}
 
-	// Regenerate the address pool.
-	p.threadedRegenerateAddresses()
-
 	// Fetch the user's address. Should be a completely new one.
-	addrNew3, err := p.AddressForUser(context.Background(), user)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// We do this in a loop since the pool of addresses was cleared in will
+	// be regenerated in the background.
+	var addrNew3 types.UnlockHash
+	build.Retry(100, 100*time.Millisecond, func() error {
+		addrNew3, err = p.AddressForUser(context.Background(), user)
+		return err
+	})
 	if addrNew3 == addr || addrNew3 == addrNew2 {
 		t.Fatalf("address should have changed")
 	}
