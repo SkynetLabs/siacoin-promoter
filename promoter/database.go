@@ -115,7 +115,7 @@ type (
 		// Primary indicates whether the address is the user's primary
 		// address. If no primary address can be found, a new address
 		// will be fetched from the pool and made primary.
-		Primary bool
+		Primary bool `bson:"primary"`
 
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
@@ -260,15 +260,30 @@ func (p *Promoter) Close() error {
 // All affected users will receive new addresses the next time they request
 // their address.
 func (p *Promoter) MarkServerDead(server string) error {
-	_, err := p.staticColWatchedAddresses().UpdateMany(context.Background(), bson.M{
-		"server":  server,
-		"primary": true,
-	}, bson.M{
-		"$set": bson.M{
-			"primary": false,
-		},
+	// Delete all addresses for that server which are not in use right now
+	// and mark all the remaining addresses as !primary.
+	// We do that within a single session for it to be ACID.
+	return p.staticDB.Client().UseSession(p.staticBGCtx, func(sc mongo.SessionContext) error {
+		_, err := p.staticColWatchedAddresses().DeleteMany(sc, bson.M{
+			"$or": bson.A{
+				bson.M{"user_id": bson.M{"$exists": false}},
+				bson.M{"user_id": ""},
+			},
+			"server": server,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = p.staticColWatchedAddresses().UpdateMany(sc, bson.M{
+			"server":  server,
+			"primary": true,
+		}, bson.M{
+			"$set": bson.M{
+				"primary": false,
+			},
+		})
+		return err
 	})
-	return err
 }
 
 // SetPrimaryAddressInvalid marks the primary address for a user as !primary.

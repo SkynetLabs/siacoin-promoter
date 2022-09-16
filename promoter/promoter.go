@@ -100,11 +100,10 @@ func newPromoter(ctx context.Context, deps dependencies.Dependencies, ac *Accoun
 
 	// Create lock client.
 	lockClient := lock.NewClient(p.staticColLocks())
-	err := lockClient.CreateIndexes(ctx)
-	if err != nil {
-		return nil, errors.Compose(err, p.Close())
-	}
 	p.staticLockClient = lockClient
+
+	// Create indexes.
+	p.staticCreateIndexes(ctx)
 
 	// Kick off creation of addresses in non-testing builds. This is not
 	// really necessary but it will prevent the first user ever from getting

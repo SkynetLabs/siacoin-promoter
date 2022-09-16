@@ -485,7 +485,27 @@ func TestAddressForUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Fetch the user's address. Should give us a new one.
+	// There should be two addresses left in the collection. The ones that
+	// the user was assigned to before. The unused ones are all gone.
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected to have 2 addrs left but got %v", n)
+	}
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("should have 0 unused addresses but got %v", n)
+	}
+
+	// Regenerate the address pool.
+	p.threadedRegenerateAddresses()
+
+	// Fetch the user's address. Should be a completely new one.
 	addrNew3, err := p.AddressForUser(context.Background(), user)
 	if err != nil {
 		t.Fatal(err)
