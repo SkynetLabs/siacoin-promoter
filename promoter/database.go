@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/siad/types"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -69,7 +68,7 @@ var (
 
 	// configIDConversionRate is the ID of the currency conversion rate in
 	// the config collection.
-	configIDConversionRate = primitive.ObjectID{1}
+	configIDConversionRate = "conversion_rate"
 )
 
 type (
