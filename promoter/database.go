@@ -112,6 +112,11 @@ type (
 
 	// WatchedAddress describes an entry in the watched address collection.
 	WatchedAddress struct {
+		// Primary indicates whether the address is the user's primary
+		// address. If no primary address can be found, a new address
+		// will be fetched from the pool and made primary.
+		Primary bool
+
 		// Address is the actual address we track. We make that the _id
 		// of the object since the addresses should be indexed and
 		// unique anyway.
@@ -197,13 +202,11 @@ func connect(ctx context.Context, log *logrus.Entry, uri, username, password str
 
 // AddressForUser returns an address for a user. If there is no such address,
 // fetch one from the pool. Then check if the pool needs to be topped up.
-// TODO: Once we add support for fetching users new addresses we need to make
-// sure we add an 'active' flag to indicate which of the associated addresses to
-// fetch.
 func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.UnlockHash, error) {
 	// Fetch address of user.
 	sr := p.staticColWatchedAddresses().FindOne(ctx, bson.M{
 		"user_id": sub,
+		"primary": true,
 	})
 	var wa WatchedAddress
 	err := sr.Decode(&wa)
@@ -219,6 +222,7 @@ func (p *Promoter) AddressForUser(ctx context.Context, sub string) (types.Unlock
 	sr = p.staticColWatchedAddresses().FindOneAndUpdate(ctx, filterUnusedAddresses, bson.M{
 		"$set": bson.M{
 			"user_id": sub,
+			"primary": true,
 		},
 	})
 	err = sr.Decode(&wa)
@@ -250,6 +254,39 @@ func (p *Promoter) Close() error {
 
 	// Disconnect from db.
 	return p.staticDB.Client().Disconnect(p.staticCtx)
+}
+
+// MarkServerDead marks all watched addresses for a given server as !primary.
+// All affected users will receive new addresses the next time they request
+// their address.
+func (p *Promoter) MarkServerDead(server string) error {
+	_, err := p.staticColWatchedAddresses().UpdateMany(context.Background(), bson.M{
+		"server":  server,
+		"primary": true,
+	}, bson.M{
+		"$set": bson.M{
+			"primary": false,
+		},
+	})
+	return err
+}
+
+// SetPrimaryAddressInvalid marks the primary address for a user as !primary.
+// The next time AddressForUser is called for that user, a new address will be
+// returned.
+func (p *Promoter) SetPrimaryAddressInvalid(sub string) error {
+	// Set the primary address of a user to !primary. We use UpdateMany here
+	// since a user should only ever have 1 primary address anyway. If
+	// that's not the case we compensate this way.
+	_, err := p.staticColWatchedAddresses().UpdateMany(context.Background(), bson.M{
+		"user_id": sub,
+		"primary": true,
+	}, bson.M{
+		"$set": bson.M{
+			"primary": false,
+		},
+	})
+	return err
 }
 
 // newUnusedWatchedAddress creates a new WatchedAddress for this promoter that

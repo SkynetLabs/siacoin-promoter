@@ -463,6 +463,36 @@ func TestAddressForUser(t *testing.T) {
 	if n != maxUnusedAddresses {
 		t.Fatalf("wrong number of addresses %v != %v", n, maxUnusedAddresses)
 	}
+
+	// Set the user's address to !primary.
+	err = p.SetPrimaryAddressInvalid(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the user's address. Should give us a new one.
+	addrNew2, err := p.AddressForUser(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addrNew2 == addr {
+		t.Fatalf("address should have changed")
+	}
+
+	// Mark server dead.
+	err = p.MarkServerDead(p.staticServerDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the user's address. Should give us a new one.
+	addrNew3, err := p.AddressForUser(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addrNew3 == addr || addrNew3 == addrNew2 {
+		t.Fatalf("address should have changed")
+	}
 }
 
 // TestInsertTransactions is a unit test for staticInsertTransactions.

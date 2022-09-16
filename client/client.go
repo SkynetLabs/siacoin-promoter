@@ -113,3 +113,19 @@ func (c *Client) PostJSONWithHeaders(resource string, headers map[string]string,
 	dec := json.NewDecoder(resp.Body)
 	return dec.Decode(obj)
 }
+
+// Post performs a simple post request to the resource without a body and
+// without expecting a response.
+func (c *Client) Post(resource string) error {
+	resp, err := c.post(resource, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check for 200 since we expect a successful response with body.
+	if resp.StatusCode != http.StatusOK {
+		return readAPIError(resp.Body)
+	}
+	return nil
+}
