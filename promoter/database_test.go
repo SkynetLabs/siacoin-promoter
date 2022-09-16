@@ -463,6 +463,59 @@ func TestAddressForUser(t *testing.T) {
 	if n != maxUnusedAddresses {
 		t.Fatalf("wrong number of addresses %v != %v", n, maxUnusedAddresses)
 	}
+
+	// Set the user's address to !primary.
+	err = p.SetPrimaryAddressInvalid(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fetch the user's address. Should give us a new one.
+	addrNew2, err := p.AddressForUser(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addrNew2 == addr {
+		t.Fatalf("address should have changed")
+	}
+
+	// Mark server dead.
+	err = p.MarkServerDead(p.staticServerDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// There should be two addresses left in the collection. The ones that
+	// the user was assigned to before. The unused ones are all gone.
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, bson.M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected to have 2 addrs left but got %v", n)
+	}
+	n, err = p.staticColWatchedAddresses().CountDocuments(p.staticBGCtx, filterUnusedAddresses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("should have 0 unused addresses but got %v", n)
+	}
+
+	// Fetch the user's address. Should be a completely new one.
+	// We do this in a loop since the pool of addresses was cleared in will
+	// be regenerated in the background.
+	var addrNew3 types.UnlockHash
+	err = build.Retry(100, 100*time.Millisecond, func() error {
+		addrNew3, err = p.AddressForUser(context.Background(), user)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addrNew3 == addr || addrNew3 == addrNew2 {
+		t.Fatalf("address should have changed")
+	}
 }
 
 // TestInsertTransactions is a unit test for staticInsertTransactions.
