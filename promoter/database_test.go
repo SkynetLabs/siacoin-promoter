@@ -506,10 +506,13 @@ func TestAddressForUser(t *testing.T) {
 	// We do this in a loop since the pool of addresses was cleared in will
 	// be regenerated in the background.
 	var addrNew3 types.UnlockHash
-	build.Retry(100, 100*time.Millisecond, func() error {
+	err = build.Retry(100, 100*time.Millisecond, func() error {
 		addrNew3, err = p.AddressForUser(context.Background(), user)
 		return err
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if addrNew3 == addr || addrNew3 == addrNew2 {
 		t.Fatalf("address should have changed")
 	}
