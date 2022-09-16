@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 
 	"github.com/SkynetLabs/siacoin-promoter/api"
+	"github.com/SkynetLabs/siacoin-promoter/dependencies"
 	"github.com/SkynetLabs/siacoin-promoter/promoter"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sirupsen/logrus"
@@ -25,7 +26,7 @@ func newTestPromoter(skyd *client.Client, name, accountsAddr string) (*promoter.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
 	ac := promoter.NewAccountsClient(accountsAddr)
-	return promoter.New(context.Background(), ac, skyd, logrus.NewEntry(logger), uri, username, password, name, name)
+	return promoter.New(context.Background(), dependencies.ProdDependencies, ac, skyd, logrus.NewEntry(logger), uri, username, password, name, name)
 }
 
 // Tester is a pair of an API and a client to talk to that API for testing.

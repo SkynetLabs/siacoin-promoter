@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SkynetLabs/siacoin-promoter/dependencies"
 	"github.com/SkynetLabs/siacoin-promoter/utils"
 	"github.com/sirupsen/logrus"
 	"gitlab.com/NebulousLabs/errors"
@@ -18,9 +19,33 @@ import (
 	"go.sia.tech/siad/types"
 )
 
-// newTestPromoter creates a Promoter instance for testing
-// without the background threads being launched.
+// dependencyDisruptOnKeyword is a dependency that disrupts for the given
+// keyword.
+type dependencyDisruptOnKeyword struct {
+	staticKeyword string
+}
+
+// Disrupt returns true if the right keyword is provided.
+func (d *dependencyDisruptOnKeyword) Disrupt(s string) bool {
+	return d.staticKeyword == s
+}
+
+// newDependencyDisruptOnKeyword creates a new dependency with a given keyword.
+func newDependencyDisruptOnKeyword(k string) *dependencyDisruptOnKeyword {
+	return &dependencyDisruptOnKeyword{
+		staticKeyword: k,
+	}
+}
+
+// newTestPromoter creates a Promoter instance for testing without the
+// background threads being launched.
 func newTestPromoter(name, dbName, accountsAddr string) (*Promoter, *siatest.TestNode, error) {
+	return newTestPromoterWithDeps(name, dependencies.ProdDependencies, dbName, accountsAddr)
+}
+
+// newTestPromoterWithDeps creates a Promoter instance for testing without the
+// background threads being launched.
+func newTestPromoterWithDeps(name string, deps dependencies.Dependencies, dbName, accountsAddr string) (*Promoter, *siatest.TestNode, error) {
 	// Create discard logger.
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
@@ -33,7 +58,7 @@ func newTestPromoter(name, dbName, accountsAddr string) (*Promoter, *siatest.Tes
 
 	// Create promoter.
 	ac := NewAccountsClient(accountsAddr)
-	p, err := New(context.Background(), ac, &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name, dbName)
+	p, err := New(context.Background(), deps, ac, &skyd.Client, logrus.NewEntry(logger), testURI, testUsername, testPassword, name, dbName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -57,7 +82,7 @@ func newTestPromoterWithUpdateFunc(name, dbName, accountsAddr string, f updateFu
 		return nil, nil, err
 	}
 	ac := NewAccountsClient(accountsAddr)
-	p, err := newPromoter(context.Background(), ac, &skyd.Client, logEntry, client, name, dbName)
+	p, err := newPromoter(context.Background(), dependencies.ProdDependencies, ac, &skyd.Client, logEntry, client, name, dbName)
 	if err != nil {
 		return nil, nil, errors.Compose(err, client.Disconnect(ctx))
 	}
@@ -163,7 +188,8 @@ func TestPollTransactions(t *testing.T) {
 	}
 	t.Parallel()
 
-	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
+	deps := newDependencyDisruptOnKeyword("DisableThreadedCreditTransactions")
+	p, node, err := newTestPromoterWithDeps(t.Name(), deps, t.Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +324,7 @@ func TestCreditTransactions(t *testing.T) {
 		}
 		txn.CreditedAt = time.Time{}
 		if !reflect.DeepEqual(txn, expectedTxn) {
-			return fmt.Errorf("txn mismatch %v != %v", dbTxns[0], expectedTxn)
+			return fmt.Errorf("txn mismatch %v != %v", txn, expectedTxn)
 		}
 		return nil
 	})

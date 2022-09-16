@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SkynetLabs/siacoin-promoter/dependencies"
 	"github.com/sirupsen/logrus"
 	lock "github.com/square/mongo-lock"
 	"gitlab.com/NebulousLabs/errors"
@@ -48,6 +49,8 @@ type (
 		staticBGCtx        context.Context
 		staticThreadCancel context.CancelFunc
 		staticWG           sync.WaitGroup
+
+		staticDeps dependencies.Dependencies
 	}
 )
 
@@ -61,12 +64,12 @@ var (
 )
 
 // New creates a new promoter from the given db credentials.
-func New(ctx context.Context, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
+func New(ctx context.Context, deps dependencies.Dependencies, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, uri, username, password, domain, db string) (*Promoter, error) {
 	client, err := connect(ctx, log, uri, username, password)
 	if err != nil {
 		return nil, err
 	}
-	p, err := newPromoter(ctx, ac, skyd, log, client, domain, db)
+	p, err := newPromoter(ctx, deps, ac, skyd, log, client, domain, db)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +78,7 @@ func New(ctx context.Context, ac *AccountsClient, skyd *client.Client, log *logr
 }
 
 // newPromoter creates a new promoter object from a given db client.
-func newPromoter(ctx context.Context, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
+func newPromoter(ctx context.Context, deps dependencies.Dependencies, ac *AccountsClient, skyd *client.Client, log *logrus.Entry, client *mongo.Client, domain, db string) (*Promoter, error) {
 	// Grab database from client.
 	database := client.Database(db)
 
@@ -86,6 +89,7 @@ func newPromoter(ctx context.Context, ac *AccountsClient, skyd *client.Client, l
 	p := &Promoter{
 		staticAccounts:     ac,
 		staticBGCtx:        bgCtx,
+		staticDeps:         deps,
 		staticThreadCancel: cancel,
 		staticCtx:          ctx,
 		staticDB:           database,
@@ -194,6 +198,10 @@ func (p *Promoter) staticAddrDiff(ctx context.Context) (toAdd []WatchedAddress, 
 // threadedCreditTransactions continuously polls the db for uncreditted txns and
 // notifies the credit promoter about them.
 func (p *Promoter) threadedCreditTransactions() {
+	if p.staticDeps.Disrupt("DisableThreadedCreditTransactions") {
+		return
+	}
+
 	t := time.NewTicker(txnPollInterval)
 	defer t.Stop()
 LOOP:
@@ -202,6 +210,13 @@ LOOP:
 		case <-p.staticBGCtx.Done():
 			return
 		case <-t.C:
+		}
+
+		// Get credit conversion rate at the beginning of this iteration.
+		cr, err := p.staticConversionRate()
+		if err != nil {
+			p.staticLogger.WithError(err).Error("Failed to fetch siacoin conversion rate")
+			continue // retry later
 		}
 
 		// Loop over txns one-by-one.
@@ -263,7 +278,7 @@ LOOP:
 			}
 
 			// Send txn to credit system.
-			if err := p.staticCreditTxn(wa.UserSub, txn.TxnID, amt); err != nil {
+			if err := p.staticCreditTxn(wa.UserSub, txn.TxnID, amt, cr); err != nil {
 				p.staticLogger.WithError(sr.Err()).Error("Failed to submit txn to credit system")
 				continue LOOP // something is wrong with the credit system - skip iteration
 			}

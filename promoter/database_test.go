@@ -3,6 +3,7 @@ package promoter
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"reflect"
 	"sync"
 	"testing"
@@ -558,5 +559,85 @@ func TestInsertTransactions(t *testing.T) {
 			t.Log(txn)
 			t.Fatal("txn mismatch")
 		}
+	}
+}
+
+// TestConversionRate is a unit test for staticConversionRate.
+func TestConversionRate(t *testing.T) {
+	if testing.Short() {
+		t.SkipNow()
+	}
+	t.Parallel()
+
+	p, node, err := newTestPromoter(t.Name(), t.Name(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := node.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	fetchRate := func() (*big.Rat, error) {
+		sr := p.staticColConfig().FindOne(context.Background(), bson.M{
+			"_id": configIDConversionRate,
+		})
+		var cr ConfigConversionRate
+		if err := sr.Decode(&cr); err != nil {
+			return nil, err
+		}
+		rate, _ := cr.Rat()
+		return rate, nil
+	}
+
+	// There should be no config in the db.
+	if _, err := fetchRate(); !errors.Contains(err, mongo.ErrNoDocuments) {
+		t.Fatal("should fail", err)
+	}
+
+	// Use staticConversionRate. This should initialise it and return the
+	// default.
+	rate, err := p.staticConversionRate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rate.Cmp(defaultConversionRate) != 0 {
+		t.Fatal("doesn't match default")
+	}
+
+	// Database should contain the default.
+	rate, err = fetchRate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rate.Cmp(defaultConversionRate) != 0 {
+		t.Fatal("doesn't match default")
+	}
+
+	// Update the value in the database.
+	newValue := big.NewRat(100, 50)
+	_, err = p.staticColConfig().UpdateOne(context.Background(), bson.M{
+		"_id": configIDConversionRate,
+	}, bson.M{
+		"$set": bson.M{
+			"numerator":   newValue.Num().String(),
+			"denominator": newValue.Denom().String(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should return that value now.
+	rate, err = p.staticConversionRate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rate.Cmp(newValue) != 0 {
+		t.Fatal("doesn't match new value")
 	}
 }
